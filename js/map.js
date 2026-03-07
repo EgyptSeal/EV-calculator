@@ -13,15 +13,10 @@
 
   var FALLBACK_STYLE_DAY = 'mapbox://styles/mapbox/light-v11';
   var FALLBACK_STYLE_NIGHT = 'mapbox://styles/mapbox/dark-v11';
-  var FOLLOW_ZOOM = 15;
-  var FOLLOW_ZOOM_START = 15.5;
+  var FOLLOW_ZOOM = 18.5;
   var FOLLOW_PITCH = 50;
-  var FOLLOW_DURATION_MS = 350;
-  var lastCarBearing = null;
-  /** Fraction of view height from top where the car should sit (0.5 = center, 0.72 = bottom area). */
-  var CAR_VIEW_VERTICAL_FRAC = 0.72;
-  /** Fallback offset (degrees) when pixel-based offset can't be used (e.g. initial fly). Car in bottom area. */
-  var CAR_VIEW_OFFSET_DEG = 0.00035;
+  var FOLLOW_DURATION_MS = 450;
+  var FOLLOW_OFFSET_Y = -80;
 
   function styleUrl(which) {
     if (which === 'night') return (C.nightStyle || FALLBACK_STYLE_NIGHT);
@@ -111,8 +106,6 @@
             map._evCarZoomHandler = true;
             map.on('zoom', function () { updateMarkerScales(); updateCarMarkerSizes(); });
             map.on('zoomend', function () { updateMarkerScales(); updateCarMarkerSizes(); });
-            map.on('rotate', updateCarMarkerRotationFromMap);
-            map.on('moveend', updateCarMarkerRotationFromMap);
           }
           onLoaded();
         });
@@ -271,13 +264,8 @@
         var el = m.getElement();
         if (el) {
           el.style.width = size + 'px';
-          el.style.height = 'auto';
-          setCarMarkerRotation(m, lastCarBearing, lastCarTurnOffset);
-          var img = el.querySelector('img');
-          if (img) {
-            img.style.width = size + 'px';
-            img.style.height = 'auto';
-          }
+          el.style.height = size + 'px';
+          el.style.transform = 'rotate(' + lastCarTurnOffset + 'deg)';
         }
       }
     });
@@ -318,8 +306,10 @@
 
     const el = document.createElement('div');
     el.className = 'map-marker map-marker-' + type;
-    el.style.width = type === 'charger' ? '28px' : '32px';
-    el.style.height = type === 'charger' ? '44px' : '32px';
+    var pinW = type === 'charger' ? 28 : 36;
+    var pinH = type === 'charger' ? 44 : 36;
+    el.style.width = pinW + 'px';
+    el.style.height = pinH + 'px';
     el.style.backgroundSize = 'contain';
     el.style.backgroundRepeat = 'no-repeat';
     el.style.backgroundPosition = 'center bottom';
@@ -329,7 +319,8 @@
     } else if (type === 'end') {
       el.style.backgroundImage = 'url("data:image/svg+xml,' + encodeURIComponent('<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\'><path fill=\'#ff4757\' d=\'M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z\'/></svg>') + '")';
     } else {
-      el.style.backgroundImage = 'url("data:image/svg+xml,' + encodeURIComponent('<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 36\'><path fill=\'#00d4ff\' stroke=\'#0088aa\' stroke-width=\'0.8\' stroke-linejoin=\'round\' d=\'M12 0C7.58 0 4 3.6 4 8c0 6 8 16 8 16s8-10 8-16c0-4.4-3.58-8-8-8zm0 11.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z\'/></svg>') + '")';
+      el.style.backgroundImage = 'none';
+      el.innerHTML = '<svg class="charger-pin-svg" viewBox="0 0 24 36" xmlns="http://www.w3.org/2000/svg"><path fill="#00b8d4" stroke="rgba(255,255,255,0.6)" stroke-width="0.8" d="M12 0C5.4 0 0 5.4 0 12c0 9 12 24 12 24s12-15 12-24C24 5.4 18.6 0 12 0zm0 17c-2.8 0-5-2.2-5-5s2.2-5 5-5 5 2.2 5 5-2.2 5-5 5z"/><path fill="#fff" d="M13 2L3 14h5l-2 8 10-12h-5l2-8z" transform="translate(6,8) scale(0.55)"/></svg>';
     }
 
     wrap.appendChild(labelEl);
@@ -381,9 +372,10 @@
       var el = markers.start.getElement();
       if (el) el.style.display = 'none';
     }
-    map.jumpTo({
+    map.easeTo({
       pitch: FOLLOW_PITCH,
-      zoom: FOLLOW_ZOOM_START,
+      zoom: FOLLOW_ZOOM,
+      duration: 800,
     });
   }
 
@@ -445,103 +437,64 @@
     return 0;
   }
 
-  /** Car icon counter-rotates when map rotates: camera rotates => car rotates the opposite way so it stays aligned with the road. */
-  function setCarMarkerRotation(marker, bearing, turnOffsetDeg) {
-    if (!marker || !marker.getElement || !map) return;
+  function setCarMarkerRotation(marker, turnOffsetDeg) {
+    if (!marker || !marker.getElement) return;
     lastCarTurnOffset = turnOffsetDeg != null ? turnOffsetDeg : 0;
-    lastCarBearing = bearing != null && !isNaN(bearing) ? bearing : lastCarBearing;
-    var mapBearing = typeof map.getBearing === 'function' ? map.getBearing() : 0;
-    var rot = (lastCarBearing != null ? lastCarBearing - mapBearing : 0) + lastCarTurnOffset;
     var el = marker.getElement();
     if (!el) return;
-    el.style.transform = 'rotate(' + rot + 'deg)';
+    el.style.transform = 'rotate(' + lastCarTurnOffset + 'deg)';
   }
 
-  function updateCarMarkerRotationFromMap() {
-    if (markers.navCar) setCarMarkerRotation(markers.navCar, lastCarBearing, lastCarTurnOffset);
-    if (markers.demoCar) setCarMarkerRotation(markers.demoCar, lastCarBearing, lastCarTurnOffset);
-  }
-
-  function zoomFromSpeed(speedKmh) {
-    if (speedKmh == null || isNaN(speedKmh)) speedKmh = 50;
-    var z = FOLLOW_ZOOM_START - (speedKmh - 50) * 0.015;
-    return Math.max(14, Math.min(17, z));
-  }
-
-  /**
-   * Compute map center so the car at (lng, lat) appears in the bottom area of the view (camera sees car from behind).
-   * Pan so car moves to (centerX, targetCarY). Uses geographic offset if car is off-screen (e.g. right after start).
-   */
-  function centerForCarAtBottom(lng, lat, bearing, zoom, pitch) {
-    zoom = zoom != null ? zoom : FOLLOW_ZOOM_START;
-    pitch = pitch != null ? pitch : FOLLOW_PITCH;
-    var container = map.getContainer();
-    var w = container && container.offsetWidth ? container.offsetWidth : 400;
-    var h = container && container.offsetHeight ? container.offsetHeight : 300;
-    var margin = Math.min(w, h) * 0.3;
-    var carPixel = map.project([lng, lat]);
-    if (carPixel.x < -margin || carPixel.x > w + margin || carPixel.y < -margin || carPixel.y > h + margin) {
-      var b = (bearing != null && !isNaN(bearing)) ? (bearing * Math.PI / 180) : 0;
-      var d = CAR_VIEW_OFFSET_DEG;
-      return { center: [lng + d * Math.sin(b), lat + d * Math.cos(b)], zoom: zoom, pitch: pitch };
-    }
-    var centerY = h / 2;
-    var targetCarY = h * CAR_VIEW_VERTICAL_FRAC;
-    var newCenterPixel = [carPixel.x, centerY + carPixel.y - targetCarY];
-    var newCenter = map.unproject(newCenterPixel);
-    return { center: [newCenter.lng, newCenter.lat], zoom: zoom, pitch: pitch };
-  }
-
-  /** Follow car with smooth camera. Camera sees the car from behind, car in bottom area of view. */
-  function followCar(lng, lat, bearing, forceFollow, speedKmh) {
+  /** Follow car with smooth easing (Google Maps style). Offset puts car slightly below center to show road ahead. */
+  function followCar(lng, lat, bearing, forceFollow) {
     if (!map || (!navigationMode && !forceFollow)) return;
-    var zoom = zoomFromSpeed(speedKmh);
-    var result = centerForCarAtBottom(lng, lat, bearing, zoom, FOLLOW_PITCH);
     var opts = {
-      center: result.center,
-      zoom: result.zoom,
-      pitch: result.pitch,
-      bearing: bearing != null && !isNaN(bearing) ? bearing : undefined,
+      center: [lng, lat],
+      zoom: FOLLOW_ZOOM,
+      pitch: FOLLOW_PITCH,
       duration: FOLLOW_DURATION_MS,
       essential: true,
+      offset: [0, FOLLOW_OFFSET_Y],
       easing: function (t) { return t * (2 - t); },
     };
+    if (bearing != null && !isNaN(bearing)) opts.bearing = bearing;
     map.easeTo(opts);
   }
 
   function flyToCar(lng, lat, opts) {
     if (!map) return;
     opts = opts || {};
-    var duration = opts.duration != null ? opts.duration : 400;
-    var zoom = opts.zoom != null ? opts.zoom : FOLLOW_ZOOM_START;
-    var pitch = opts.pitch != null ? opts.pitch : FOLLOW_PITCH;
-    var bearing = opts.bearing != null && !isNaN(opts.bearing) ? opts.bearing : 0;
-    var b = (bearing * Math.PI / 180);
-    var d = CAR_VIEW_OFFSET_DEG;
-    var center = [lng + d * Math.sin(b), lat + d * Math.cos(b)];
+    var duration = opts.duration != null ? opts.duration : 800;
     var flyOpts = {
-      center: center,
-      zoom: zoom,
-      pitch: pitch,
+      center: [lng, lat],
+      zoom: opts.zoom != null ? opts.zoom : FOLLOW_ZOOM,
+      pitch: opts.pitch != null ? opts.pitch : FOLLOW_PITCH,
       duration: duration,
       essential: true,
+      offset: [0, FOLLOW_OFFSET_Y],
       easing: function (t) { return t * (2 - t); },
     };
-    flyOpts.bearing = bearing;
+    if (opts.bearing != null && !isNaN(opts.bearing)) flyOpts.bearing = opts.bearing;
     map.flyTo(flyOpts);
   }
 
   function createCarMarkerElement(className) {
     var wrap = document.createElement('div');
     wrap.className = className;
-    var img = document.createElement('img');
-    img.src = 'assets/car-map-icon.png';
-    img.alt = 'Car';
-    img.style.display = 'block';
-    img.style.pointerEvents = 'none';
-    wrap.appendChild(img);
     wrap.style.transformOrigin = 'center center';
-    wrap.style.transition = 'transform 0s';
+    wrap.style.transition = 'transform 0.25s ease-out';
+    var ripples = document.createElement('div');
+    ripples.className = 'car-marker-ripples';
+    for (var i = 0; i < 3; i++) {
+      var ring = document.createElement('div');
+      ring.className = 'car-marker-ripple';
+      ring.style.animationDelay = (i * 0.6) + 's';
+      ripples.appendChild(ring);
+    }
+    wrap.appendChild(ripples);
+    var dot = document.createElement('div');
+    dot.className = 'car-marker-dot';
+    wrap.appendChild(dot);
     return wrap;
   }
 
@@ -556,7 +509,7 @@
         .addTo(map);
     }
     markers.navCar.setLngLat([lng, lat]);
-    setCarMarkerRotation(markers.navCar, bearing, turnOffsetDeg);
+    setCarMarkerRotation(markers.navCar, turnOffsetDeg);
     updateCarMarkerSizes();
   }
 
@@ -575,7 +528,7 @@
       markers.demoCar = new mapboxgl.Marker({ element: el, anchor: 'center' }).setLngLat([lng, lat]).addTo(map);
     }
     markers.demoCar.setLngLat([lng, lat]);
-    setCarMarkerRotation(markers.demoCar, bearing, turnOffsetDeg);
+    setCarMarkerRotation(markers.demoCar, turnOffsetDeg);
     updateCarMarkerSizes();
   }
 
@@ -594,7 +547,6 @@
   function _setMap(instance) {
     if (instance && typeof instance.resize === 'function') {
       map = instance;
-      currentStyle = document.documentElement.classList.contains('theme-light') ? 'day' : 'night';
     }
   }
 

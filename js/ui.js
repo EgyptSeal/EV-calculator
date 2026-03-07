@@ -144,7 +144,7 @@
     const pctEl = document.getElementById('batteryPct');
     if (pctEl) pctEl.textContent = (percent != null ? percent : 82) + '%';
     const fillEl = document.getElementById('batteryFill');
-    if (fillEl) fillEl.style.height = (percent != null ? percent : 82) + '%';
+    if (fillEl) fillEl.style.width = (percent != null ? percent : 82) + '%';
     const rangeEl = document.getElementById('estRangeValue');
     if (rangeEl) rangeEl.textContent = (rangeKm != null ? Math.round(rangeKm) : '—') + ' KM';
   }

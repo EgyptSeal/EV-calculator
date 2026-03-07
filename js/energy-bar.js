@@ -30,9 +30,9 @@
 
     var startPct = options.currentBatteryPercent != null ? options.currentBatteryPercent : 100;
     var predictedPct = predictedEndPercent != null ? predictedEndPercent : 20;
-    /* Zero pin: exact route progress where battery hits 0%. Green from start to zero point, red from zero point to end. */
+    /* Zero pin: exact route progress where battery hits 0%. Use zeroPointProgress when provided, else derive from effective range. */
     var zeroPinPos = zeroPointProgress != null ? Math.max(0, Math.min(100, zeroPointProgress)) : 100;
-    var showRed = zeroPinPos < 100;
+    var showRed = zeroPinPos < 100 && predictedPct <= 0;
     if (zeroPointProgress == null && routeDistanceKm > 0 && effectiveRangeKm > 0 && effectiveRangeKm < routeDistanceKm) {
       zeroPinPos = Math.max(0, Math.min(100, (effectiveRangeKm / routeDistanceKm) * 100));
       showRed = true;
@@ -46,7 +46,7 @@
 
     if (fillEl) {
       fillEl.style.width = (showRed ? zeroPinPos : 100) + '%';
-      fillEl.classList.toggle('low', false);
+      fillEl.classList.toggle('low', currentBatteryPercent <= lowBatteryPercent);
     }
     if (carEl) {
       carEl.style.left = (tripProgress * 100).toFixed(1) + '%';
@@ -55,7 +55,6 @@
     if (startLabel) startLabel.textContent = (currentBatteryPercent != null ? currentBatteryPercent : 82) + '%';
     if (redSeg) {
       redSeg.style.left = zeroPinPos.toFixed(1) + '%';
-      redSeg.style.width = (100 - zeroPinPos).toFixed(1) + '%';
       redSeg.style.display = showRed ? 'block' : 'none';
     }
     if (zeroPinWrap) {

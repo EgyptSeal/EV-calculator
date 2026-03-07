@@ -70,7 +70,6 @@
 
   function applyTripToUI() {
     updateInfoRouteStatus();
-    updateInfoTips();
     const v = state.vehicle;
     var tripOpts = buildTripOptions();
     const rangeKm = v ? Trip.effectiveRangeKm(v, state.startBattery, tripOpts) : 0;
@@ -211,80 +210,6 @@
     }
   }
 
-  var tipsRotationIndex = 0;
-  var tipsRotationInterval = null;
-  var currentTipsArray = [];
-
-  function buildTipsList() {
-    var s = state;
-    var ambient = s.ambientTempC != null && !isNaN(s.ambientTempC) ? s.ambientTempC : 25;
-    var cabin = s.cabinTempC != null && !isNaN(s.cabinTempC) ? s.cabinTempC : 24;
-    var acGap = s.acOn && Math.abs(cabin - ambient) > 3;
-    var tips = [];
-    if (s.drivingMode !== 'eco') {
-      tips.push({ strong: 'Try Eco mode', text: ' – typically 8–15% more range with no extra effort.' });
-    }
-    if ((s.maxSpeedKmh || 120) > 100) {
-      tips.push({ strong: 'Lower max speed to 90–100 km/h', text: ' – 20–30% more range on highways.' });
-    }
-    if (acGap) {
-      tips.push({ strong: 'Set cabin temp closer to ambient', text: ' – smaller AC gap saves 5–10%.' });
-    }
-    if ((s.passengers || 1) > 1 || (s.luggageKg || 0) > 25) {
-      tips.push({ strong: 'Lighten load where you can', text: ' – every ~40 kg costs roughly 3–5 km range.' });
-    }
-    tips.push({ strong: 'Precondition while plugged in', text: ' – heat or cool the cabin before you leave to save battery.' });
-    tips.push({ strong: 'Use cruise control on the highway', text: ' – steady speed can add 5–15% efficiency.' });
-    tips.push({ strong: 'Smooth acceleration', text: ' – gentle throttle often gives 10–20% better efficiency.' });
-    tips.push({ strong: 'Plan charging around meals', text: ' – 20–30 min at a DC charger is often enough for the next leg.' });
-    tips.push({ strong: 'Charge in the 20–80% band', text: ' – usually the fastest and kindest to the battery.' });
-    tips.push({ strong: 'Park in the shade in summer', text: ' – less cabin cooling needed when you return.' });
-    tips.push({ strong: 'Check charger availability before leaving', text: ' – avoid queues and range stress.' });
-    tips.push({ strong: 'One-pedal driving', text: ' – maximize regen and reduce brake wear.' });
-    return tips;
-  }
-
-  function showTipsPair(listEl, tips, pairIndex) {
-    if (!listEl || !tips.length) return;
-    var n = tips.length;
-    var numPairs = Math.ceil(n / 2) || 1;
-    var start = (pairIndex % numPairs) * 2;
-    var toShow = start + 1 < n ? [tips[start], tips[start + 1]] : [tips[start]];
-    listEl.innerHTML = '';
-    toShow.forEach(function (t) {
-      var li = document.createElement('li');
-      li.innerHTML = '<strong>' + t.strong + '</strong>' + t.text;
-      listEl.appendChild(li);
-    });
-  }
-
-  function advanceTipsRotation() {
-    var listEl = document.getElementById('infoTipsList');
-    if (!listEl || !currentTipsArray.length) return;
-    var n = currentTipsArray.length;
-    var numPairs = Math.ceil(n / 2) || 1;
-    listEl.classList.add('tips-fade-out');
-    setTimeout(function () {
-      tipsRotationIndex = (tipsRotationIndex + 1) % numPairs;
-      showTipsPair(listEl, currentTipsArray, tipsRotationIndex);
-      listEl.classList.remove('tips-fade-out');
-    }, 380);
-  }
-
-  /** Build tips (not already applied), show 2 at a time, rotate every 5s with smooth fade. */
-  function updateInfoTips() {
-    var listEl = document.getElementById('infoTipsList');
-    if (!listEl) return;
-    if (tipsRotationInterval) clearInterval(tipsRotationInterval);
-    tipsRotationInterval = null;
-    currentTipsArray = buildTipsList();
-    tipsRotationIndex = 0;
-    showTipsPair(listEl, currentTipsArray, 0);
-    if (currentTipsArray.length > 2) {
-      tipsRotationInterval = setInterval(advanceTipsRotation, 5000);
-    }
-  }
-
   function doSaveAndStart() {
     var el;
     state.startBattery = parseInt((el = document.getElementById('modalStartBattery')) && el.value, 10) || 100;
@@ -296,9 +221,6 @@
     state.maxSpeedKmh = parseInt((el = document.getElementById('modalMaxSpeed')) && el.value, 10) || 120;
     el = document.getElementById('modalDrivingMode');
     state.drivingMode = (el && el.value) || 'standard';
-    el = document.getElementById('modalAmbientTemp');
-    var ambientVal = el && el.value ? parseFloat(el.value) : NaN;
-    if (ambientVal != null && !isNaN(ambientVal)) state.ambientTempC = ambientVal;
     var data = window.EVTripPlannerData;
     var evDb = (data && data.getEVDatabase && data.getEVDatabase()) || window.__EV_DATABASE_EMBEDDED || { vehicles: [] };
     var vehicles = (evDb && evDb.vehicles) || [];
@@ -310,7 +232,6 @@
     var modal = document.getElementById('startupModal');
     if (modal) { modal.classList.add('hidden'); modal.style.display = 'none'; }
     if (window.EVTripPlannerUI && window.EVTripPlannerUI.showModal) window.EVTripPlannerUI.showModal(false);
-    applyTripToUI();
     setTimeout(initMapAndMain, 80);
   }
   global.onSaveAndStart = doSaveAndStart;
@@ -674,29 +595,16 @@
     }
     if (startNavBtn) startNavBtn.addEventListener('click', function () {
       if (!state.route || !state.endCoords) return;
+      if (MapModule.removeDemoCar) MapModule.removeDemoCar();
       state.navigationActive = true;
       updateNavButtons();
       if (MapModule.enterNavigationMode) MapModule.enterNavigationMode();
       var coords = state.route.coordinates;
       if (coords && coords.length >= 2 && MapModule.flyToCar) {
         var bearing = MapModule.bearingBetween ? MapModule.bearingBetween(coords[0][0], coords[0][1], coords[1][0], coords[1][1]) : null;
-        MapModule.flyToCar(coords[0][0], coords[0][1], { bearing: bearing, duration: 400 });
+        MapModule.flyToCar(coords[0][0], coords[0][1], { bearing: bearing, duration: 1000 });
         var turnOff = MapModule.getTurnOffsetFromRoute ? MapModule.getTurnOffsetFromRoute(coords, 0) : 0;
         if (MapModule.setNavigationCarPosition) MapModule.setNavigationCarPosition(coords[0][0], coords[0][1], bearing, turnOff);
-      }
-      var navSmoothedLng = null;
-      var navSmoothedLat = null;
-      var NAV_SMOOTH = 0.3;
-      function setNavCarSmoothed(lng, lat, br, turnOff, speedKmh) {
-        if (navSmoothedLng == null || navSmoothedLat == null) {
-          navSmoothedLng = lng;
-          navSmoothedLat = lat;
-        } else {
-          navSmoothedLng += (lng - navSmoothedLng) * NAV_SMOOTH;
-          navSmoothedLat += (lat - navSmoothedLat) * NAV_SMOOTH;
-        }
-        if (MapModule.setNavigationCarPosition) MapModule.setNavigationCarPosition(navSmoothedLng, navSmoothedLat, br, turnOff);
-        if (MapModule.followCar) MapModule.followCar(navSmoothedLng, navSmoothedLat, br, undefined, speedKmh);
       }
       navigator.geolocation.getCurrentPosition(
         function (pos) {
@@ -704,8 +612,8 @@
           var br = coords && coords.length >= 2 && MapModule.getBearingFromRoute ? MapModule.getBearingFromRoute(coords, lng, lat) : null;
           var seg = coords && MapModule.getSegmentIndexFromRoute ? MapModule.getSegmentIndexFromRoute(coords, lng, lat) : 0;
           var turnOff = coords && MapModule.getTurnOffsetFromRoute ? MapModule.getTurnOffsetFromRoute(coords, seg) : 0;
-          var speed = (pos.coords.speed != null && !isNaN(pos.coords.speed)) ? Math.round(pos.coords.speed * 3.6) : state.currentSpeedKmh;
-          setNavCarSmoothed(lng, lat, br, turnOff, speed);
+          if (MapModule.setNavigationCarPosition) MapModule.setNavigationCarPosition(lng, lat, br, turnOff);
+          if (MapModule.followCar) MapModule.followCar(lng, lat, br);
         },
         function () {},
         { enableHighAccuracy: true, maximumAge: 5000 }
@@ -722,7 +630,8 @@
           var br = state.route && state.route.coordinates && MapModule.getBearingFromRoute ? MapModule.getBearingFromRoute(state.route.coordinates, lng, lat) : null;
           var seg = state.route && state.route.coordinates && MapModule.getSegmentIndexFromRoute ? MapModule.getSegmentIndexFromRoute(state.route.coordinates, lng, lat) : 0;
           var turnOff = state.route && state.route.coordinates && MapModule.getTurnOffsetFromRoute ? MapModule.getTurnOffsetFromRoute(state.route.coordinates, seg) : 0;
-          setNavCarSmoothed(lng, lat, br, turnOff, state.currentSpeedKmh);
+          if (MapModule.setNavigationCarPosition) MapModule.setNavigationCarPosition(lng, lat, br, turnOff);
+          if (MapModule.followCar) MapModule.followCar(lng, lat, br);
           updateSpeedSign(pos.coords.speed, state.maxSpeedKmh);
           if (!state.route || !state.route.coordinates || state.route.coordinates.length < 2) return;
           var v = state.vehicle;
@@ -798,6 +707,20 @@
                 UI.renderChargerList('chargerList', state.chargersNearRoute, state.currentLang);
               });
               applyTripToUI();
+              var bar = document.getElementById('energyProgressWrap');
+              if (bar && window.EVTripPlannerEnergyBar) {
+                var tripOpts = buildTripOptions();
+                var waypointsWithDist = (state.waypoints && state.waypoints.length && newRoute.coordinates && newRoute.distanceKm) ? state.waypoints.map(function (wp) {
+                  var d = Chargers.distanceAlongRouteToPointKm(newRoute.coordinates, wp.lng, wp.lat);
+                  return { distKm: d, chargeTo: wp.chargeTo != null ? wp.chargeTo : 100, name: wp.name };
+                }).sort(function (a, b) { return a.distKm - b.distKm; }) : [];
+                var endBattery = state.vehicle ? (waypointsWithDist.length ? Trip.batteryAtEndWithWaypoints(state.vehicle, state.startBattery, newRoute.distanceKm, waypointsWithDist, tripOpts) : Trip.batteryAtEnd(state.vehicle, state.startBattery, newRoute.distanceKm, tripOpts)) : 20;
+                var zeroPct = state.vehicle ? Trip.zeroPointProgress(state.vehicle, state.startBattery, newRoute.distanceKm, waypointsWithDist, tripOpts) : 100;
+                var cs = waypointsWithDist.map(function (w) {
+                  return { progress: newRoute.distanceKm > 0 ? Math.max(0, Math.min(1, w.distKm / newRoute.distanceKm)) : 0, name: w.name || 'Charging Station' };
+                });
+                window.EVTripPlannerEnergyBar.updateBar(bar, { currentBatteryPercent: state.startBattery, predictedEndPercent: Math.round(endBattery), tripProgress: 0, chargeStops: cs, zeroPointProgress: zeroPct, routeDistanceKm: newRoute.distanceKm });
+              }
             });
           }
         },
@@ -815,7 +738,6 @@
       if (MapModule.exitNavigationMode) MapModule.exitNavigationMode();
       updateSpeedSign(null, null);
       updateNavButtons();
-      if (state.startCoords && state.endCoords) updateRouteFromCoords();
     });
     document.getElementById('addStopBtn')?.addEventListener('click', () => {
       const list = document.getElementById('stopsList');
@@ -1041,17 +963,6 @@
     return hour >= 6 && hour < 18;
   }
 
-  var ACCENT_STORAGE_KEY = 'evTripPlannerAccent';
-
-  function applyAccentColor(accent) {
-    var root = document.documentElement;
-    var val = accent || localStorage.getItem(ACCENT_STORAGE_KEY) || 'green';
-    root.setAttribute('data-accent', val);
-    if (localStorage) try { localStorage.setItem(ACCENT_STORAGE_KEY, val); } catch (e) {}
-    var sel = document.getElementById('themeColorSelect');
-    if (sel && sel.value !== val) sel.value = val;
-  }
-
   function setupThemeToggle() {
     var root = document.documentElement;
     var btn = document.getElementById('themeToggle');
@@ -1060,18 +971,6 @@
       root.classList.add(isDark ? 'theme-dark' : 'theme-light');
       root.classList.remove(isDark ? 'theme-light' : 'theme-dark');
       if (btn) btn.textContent = isDark ? 'Map: Dark' : 'Map: Light';
-    }
-    applyAccentColor();
-    var sel = document.getElementById('themeColorSelect');
-    if (sel) sel.addEventListener('change', function () { applyAccentColor(sel.value); });
-    if (btn) {
-      btn.addEventListener('click', function () {
-        root.classList.toggle('theme-light');
-        root.classList.toggle('theme-dark');
-        var isDark = !root.classList.contains('theme-light');
-        if (btn) btn.textContent = isDark ? 'Map: Dark' : 'Map: Light';
-        applyMapTheme(isDark);
-      });
     }
     var isDark = !root.classList.contains('theme-light');
     applyMapTheme(isDark);
@@ -1089,22 +988,20 @@
     if (window.EVTripPlannerMap && typeof window.EVTripPlannerMap._setMap === 'function') {
       window.EVTripPlannerMap._setMap(mapInstance);
     }
+    var styleUrl = isDark
+      ? (mapboxConfig.nightStyle || 'mapbox://styles/mapbox/dark-v11')
+      : (mapboxConfig.dayStyle || 'mapbox://styles/mapbox/light-v11');
     function redrawRouteAndMarkers() {
       try {
         if (mapInstance.resize) mapInstance.resize();
         reapplyRouteAndMarkers();
       } catch (e) {}
     }
-    if (window.EVTripPlannerMap && typeof window.EVTripPlannerMap.setStyle === 'function') {
-      window.EVTripPlannerMap.setStyle(isDark ? 'night' : 'day', redrawRouteAndMarkers);
-    } else {
-      var styleUrl = isDark
-        ? (mapboxConfig.nightStyle || 'mapbox://styles/mapbox/dark-v11')
-        : (mapboxConfig.dayStyle || 'mapbox://styles/mapbox/light-v11');
-      mapInstance.once('style.load', redrawRouteAndMarkers);
-      try { mapInstance.setStyle(styleUrl); } catch (e) {}
-      setTimeout(redrawRouteAndMarkers, 1200);
-    }
+    mapInstance.once('style.load', redrawRouteAndMarkers);
+    try {
+      mapInstance.setStyle(styleUrl);
+    } catch (e) {}
+    setTimeout(redrawRouteAndMarkers, 1200);
   }
 
   function setupDemo() {
@@ -1162,6 +1059,7 @@
         return;
       }
       stopDemo();
+      if (MapModule.clearNavigationCar) MapModule.clearNavigationCar();
       runBtn.style.display = '';
       stopBtn.style.display = 'block';
       if (runBtn) runBtn.textContent = 'Pause';
@@ -1174,16 +1072,13 @@
       if (coords && coords.length >= 2 && MapModule.enterNavigationMode) MapModule.enterNavigationMode();
       if (coords && coords.length >= 2 && MapModule.flyToCar) {
         var bearing = MapModule.bearingBetween ? MapModule.bearingBetween(coords[0][0], coords[0][1], coords[1][0], coords[1][1]) : null;
-        MapModule.flyToCar(coords[0][0], coords[0][1], { bearing: bearing, duration: 400 });
+        MapModule.flyToCar(coords[0][0], coords[0][1], { bearing: bearing, duration: 800 });
       }
       var totalDist = 0;
       for (var i = 1; i < coords.length; i++) {
         totalDist += Chargers.haversineKm(coords[i-1][1], coords[i-1][0], coords[i][1], coords[i][0]);
       }
       var v = state.vehicle;
-      var demoSmoothedLng = coords[0][0];
-      var demoSmoothedLat = coords[0][1];
-      var DEMO_SMOOTH = 0.35;
 
       function tick() {
         if (!demoRunning) return;
@@ -1211,12 +1106,10 @@
         t = Math.max(0, Math.min(1, t));
         var lng = coords[seg][0] + t * (coords[seg+1][0] - coords[seg][0]);
         var lat = coords[seg][1] + t * (coords[seg+1][1] - coords[seg][1]);
-        demoSmoothedLng += (lng - demoSmoothedLng) * DEMO_SMOOTH;
-        demoSmoothedLat += (lat - demoSmoothedLat) * DEMO_SMOOTH;
         var bearing = seg + 1 < coords.length && MapModule.bearingBetween ? MapModule.bearingBetween(coords[seg][0], coords[seg][1], coords[seg + 1][0], coords[seg + 1][1]) : null;
         var turnOffset = MapModule.getTurnOffsetFromRoute ? MapModule.getTurnOffsetFromRoute(coords, seg) : 0;
-        if (window.EVTripPlannerMap && window.EVTripPlannerMap.setDemoCarPosition) window.EVTripPlannerMap.setDemoCarPosition(demoSmoothedLng, demoSmoothedLat, bearing, turnOffset);
-        if (MapModule.followCar) MapModule.followCar(demoSmoothedLng, demoSmoothedLat, bearing, true, carSpeedKmh);
+        if (window.EVTripPlannerMap && window.EVTripPlannerMap.setDemoCarPosition) window.EVTripPlannerMap.setDemoCarPosition(lng, lat, bearing, turnOffset);
+        if (MapModule.followCar) MapModule.followCar(lng, lat, bearing, true);
         updateSpeedSign(carSpeedKmh / 3.6, state.maxSpeedKmh);
         var demoState = Object.assign({}, state, { maxSpeedKmh: carSpeedKmh, useInstantSpeed: true, routeDistanceKm: totalDist });
         var consumptionKwhPerKm = v ? Trip.consumptionPerKm(v, demoState) : 0.2;
@@ -1268,7 +1161,6 @@
 
   function init() {
     initModal();
-    setTimeout(updateInfoTips, 50);
     Data.ready.then(function () { }).catch(function () { });
   }
 
@@ -1289,9 +1181,6 @@
     el = document.getElementById('modalLuggage'); if (el) el.value = state.luggageKg;
     el = document.getElementById('modalMaxSpeed'); if (el) el.value = state.maxSpeedKmh;
     el = document.getElementById('modalDrivingMode'); if (el) el.value = state.drivingMode;
-    if (state.ambientTempC != null && !isNaN(state.ambientTempC)) {
-      el = document.getElementById('modalAmbientTemp'); if (el) el.value = state.ambientTempC;
-    }
   }
 
   function syncAcTogglePill() {

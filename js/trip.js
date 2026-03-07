@@ -2,19 +2,12 @@
  * Trip energy prediction – physics-based consumption model.
  * Based on: base consumption, speed, road types, elevation, temperature, wind, traffic, load, HVAC.
  * Goal: Tesla / ABRP-level accuracy.
- *
- * All car range and consumption-derived values include a +4% range boost (RANGE_BOOST).
- * It is applied once in consumptionPerKm so effectiveRangeKm, batteryAtEnd, tripEnergyKwh,
- * zeroPointProgress, chargingStopsNeeded, and every UI that uses these get the same +4% in all conditions.
  */
 (function (global) {
   const C = global.EVTripPlannerConfig?.routing || {};
   const miToKm = C.miToKm || 1.60934;
   const lowBatteryPercent = C.lowBatteryWarningPercent ?? 5;
   const costPerKwh = C.costPerKwhEGP ?? 4.5;
-
-  /** +4% range boost for all calculations (no change to car data). Applied in consumptionPerKm only. */
-  const RANGE_BOOST = 1.04;
 
   /** Normalize vehicle fields – support both old and new schema. */
   function getVehicleFields(v) {
@@ -186,11 +179,11 @@
     const modeFact = drivingModeFactor(options.drivingMode);
 
     const adjusted = base * speedMult * elevFactor * tempFactor * windFact * trafficFact * loadFact * hvacFact * modeFact;
-    return Math.max(0.05, adjusted / RANGE_BOOST);
+    return Math.max(0.05, adjusted);
   }
 
   /**
-   * Effective range (km) at given battery %. Includes RANGE_BOOST via consumptionPerKm.
+   * Effective range (km) at given battery %.
    */
   function effectiveRangeKm(vehicle, batteryPercent, options = {}) {
     if (!vehicle || batteryPercent <= 0) return 0;

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="theme-dark" data-accent="green">
+<html lang="en" class="theme-dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -131,15 +131,13 @@
   <header class="app-header">
     <span class="app-title">EV TRIP PLANNER</span>
     <div class="header-controls">
-      <div class="theme-color-box" title="Theme accent color">
-        <label class="theme-color-label">Theme:</label>
-        <select id="themeColorSelect" class="theme-color-select" aria-label="Accent color">
-          <option value="blue">Blue</option>
-          <option value="green" selected>Green</option>
-          <option value="red">Red</option>
-          <option value="purple">Purple</option>
-          <option value="pink">Pink</option>
-        </select>
+      <div class="theme-color-picker" title="Theme color">
+        <button type="button" class="theme-color-swatch" data-theme-color="blue" aria-label="Blue theme" title="Blue"></button>
+        <button type="button" class="theme-color-swatch" data-theme-color="red" aria-label="Red theme" title="Red"></button>
+        <button type="button" class="theme-color-swatch" data-theme-color="green" aria-label="Green theme" title="Green"></button>
+        <button type="button" class="theme-color-swatch" data-theme-color="purple" aria-label="Purple theme" title="Purple"></button>
+        <button type="button" class="theme-color-swatch" data-theme-color="pink" aria-label="Pink theme" title="Pink"></button>
+        <button type="button" class="theme-color-swatch" data-theme-color="yellow" aria-label="Yellow theme" title="Yellow"></button>
       </div>
       <button type="button" class="btn-theme" id="themeToggle" title="Toggle dark/light theme">Map: Dark</button>
       <button type="button" class="btn-theme" id="tripSetupBtn" title="Vehicle & trip settings">Trip setup</button>
@@ -219,8 +217,10 @@
         <span>CHARGING STOPS: <strong id="routeChargingStops">0</strong></span>
       </div>
       <div class="battery-sidebar-inline">
-        <div class="battery-bar-vertical">
-          <div class="fill" id="batteryFill"></div>
+        <div class="battery-bar-horizontal">
+          <div class="battery-track">
+            <div class="fill" id="batteryFill"></div>
+          </div>
           <span class="pct" id="batteryPct">82%</span>
         </div>
         <div class="est-range-label">ACR RANGE: <span class="est-range-value" id="estRangeValue">245 KM</span></div>
@@ -257,7 +257,16 @@
       <div class="info-panel-grid">
         <div class="info-panel-section info-tips animate-fade-in">
           <div class="info-panel-title">Tips: Lower consumption & better charge</div>
-          <ul class="info-tips-list" id="infoTipsList"></ul>
+          <ul class="info-tips-list">
+            <li><strong>Eco mode</strong> – ~15% more range vs Standard</li>
+            <li><strong>Reduce speed</strong> – 90–100 km/h adds 20–30% range</li>
+            <li><strong>Minimize AC gap</strong> – Set cabin temp close to ambient</li>
+            <li><strong>Precondition plugged in</strong> – Heat/cool before unplugging</li>
+            <li><strong>Lighten load</strong> – ~4 km per 40 kg extra</li>
+            <li><strong>Regen braking</strong> – Anticipate stops to recover energy</li>
+            <li><strong>Tire pressure</strong> – Keep at recommended level</li>
+            <li><strong>Charge 20–80%</strong> – Often fastest charging range</li>
+          </ul>
         </div>
         <div class="info-panel-section info-quick animate-fade-in animate-delay-1">
           <div class="info-panel-title">Quick reference</div>
@@ -326,7 +335,6 @@
       </div>
     </div>
   </div>
-  </div>
 
   <script src="https://api.mapbox.com/mapbox-gl-js/v3.19.0/mapbox-gl.js"></script>
   <script>
@@ -359,6 +367,39 @@
     } catch (e) {}
   </script>
   <script>
+    (function setInitialTheme() {
+      var root = document.documentElement;
+      var hour = new Date().getHours();
+      var isDark = hour < 6 || hour >= 18;
+      root.classList.remove('theme-dark', 'theme-light');
+      root.classList.add(isDark ? 'theme-dark' : 'theme-light');
+      var btn = document.getElementById('themeToggle');
+      if (btn) btn.textContent = isDark ? 'Map: Dark' : 'Map: Light';
+      var savedColor = typeof localStorage !== 'undefined' && localStorage.getItem('evTripThemeColor');
+      if (savedColor) {
+        root.classList.remove('theme-color-blue', 'theme-color-red', 'theme-color-green', 'theme-color-purple', 'theme-color-pink', 'theme-color-yellow');
+        root.classList.add('theme-color-' + savedColor);
+      } else {
+        root.classList.add('theme-color-blue');
+      }
+      document.querySelectorAll('.theme-color-swatch').forEach(function (sw) {
+        sw.classList.toggle('active', (sw.getAttribute('data-theme-color') || '') === (savedColor || 'blue'));
+      });
+    })();
+    (function bindThemeColorPicker() {
+      var root = document.documentElement;
+      document.querySelectorAll('.theme-color-swatch').forEach(function (sw) {
+        sw.addEventListener('click', function () {
+          var color = sw.getAttribute('data-theme-color') || 'blue';
+          root.classList.remove('theme-color-blue', 'theme-color-red', 'theme-color-green', 'theme-color-purple', 'theme-color-pink', 'theme-color-yellow');
+          root.classList.add('theme-color-' + color);
+          document.querySelectorAll('.theme-color-swatch').forEach(function (s) { s.classList.remove('active'); });
+          sw.classList.add('active');
+          try { localStorage.setItem('evTripThemeColor', color); } catch (e) {}
+          if (typeof window.__evSyncModalTheme === 'function') window.__evSyncModalTheme();
+        });
+      });
+    })();
     window.__evHideModalAndStart = function() {
       var modal = document.getElementById('startupModal');
       if (modal) { modal.style.display = 'none'; modal.classList.add('hidden'); modal.setAttribute('aria-hidden', 'true'); }
@@ -400,7 +441,6 @@
             }
           });
           if (window.EVTripPlannerMap && typeof window.EVTripPlannerMap._setMap === 'function') window.EVTripPlannerMap._setMap(m);
-          if (window.EVTripPlannerMap && typeof window.EVTripPlannerMap.setStyle === 'function') window.EVTripPlannerMap.setStyle(isDark ? 'night' : 'day');
           window.__evMapboxMap = m;
         }
       }
@@ -433,6 +473,7 @@
         modal.classList.remove('theme-modal-dark', 'theme-modal-light');
         modal.classList.add(isLight ? 'theme-modal-light' : 'theme-modal-dark');
       }
+      window.__evSyncModalTheme = syncModalTheme;
       function showModal() {
         if (!modal) return;
         if (window.EVTripPlannerApp) {

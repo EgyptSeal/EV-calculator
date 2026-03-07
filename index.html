@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-dark" data-accent="green">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>EV Trip Planner – Egypt</title>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.19.0/mapbox-gl.css" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <!-- Startup: Vehicle selection & trip setup modal -->
+  <div id="startupModal" class="modal-overlay">
+    <div class="vehicle-modal">
+      <h2>EV TRIP PLANNER – Select Vehicle & Trip Setup</h2>
+      <div class="panel-title">SELECT VEHICLE</div>
+      <div id="vehicleCards" class="vehicle-cards"></div>
+      <div class="panel-title">TRIP SETUP</div>
+      <div class="modal-section">
+        <div class="modal-grid">
+          <div class="modal-field">
+            <label>Starting battery %</label>
+            <input type="number" id="modalStartBattery" min="1" max="100" value="100">
+          </div>
+          <div class="modal-field">
+            <label>Target battery % at destination</label>
+            <input type="number" id="modalTargetBattery" min="0" max="100" value="20">
+          </div>
+          <div class="modal-field">
+            <label>Air temperature (°C)</label>
+            <input type="number" id="modalAmbientTemp" step="0.1" placeholder="From weather" title="Fetched from Open-Meteo when you start">
+          </div>
+          <div class="modal-field ac-toggle-field">
+            <label>Climate</label>
+            <div class="ac-toggle-pill" id="modalAcTogglePill" role="button" tabindex="0" title="Toggle AC – off saves range">
+              <input type="checkbox" id="modalAcOff" class="ac-toggle-input" aria-hidden="true">
+              <span class="ac-toggle-track">
+                <span class="ac-toggle-thumb"></span>
+              </span>
+              <span class="ac-toggle-label ac-label-off">AC OFF</span>
+              <span class="ac-toggle-label ac-label-on">AC ON</span>
+            </div>
+          </div>
+          <div class="modal-field">
+            <label>Planned cabin AC (°C)</label>
+            <input type="number" id="modalCabinTemp" step="0.1" value="24">
+          </div>
+          <div class="modal-field">
+            <label>Driving mode</label>
+            <select id="modalDrivingMode">
+              <option value="eco">Eco</option>
+              <option value="standard" selected>Standard</option>
+              <option value="aggressive">Aggressive</option>
+            </select>
+          </div>
+          <div class="modal-field">
+            <label>Passengers</label>
+            <input type="number" id="modalPassengers" min="1" max="9" value="1">
+          </div>
+          <div class="modal-field">
+            <label>Trunk / luggage (kg)</label>
+            <input type="number" id="modalLuggage" min="0" value="0">
+          </div>
+          <div class="modal-field">
+            <label>Maximum speed (km/h)</label>
+            <input type="number" id="modalMaxSpeed" min="50" max="200" value="120">
+          </div>
+        </div>
+        <p style="font-size:0.75rem; color: var(--text-secondary); margin-top:8px;">Wind speed and direction are read from Open-Meteo and are not editable.</p>
+        <div class="modal-field" style="margin-top:12px;">
+          <label>Departure</label>
+          <input type="datetime-local" id="modalDeparture">
+        </div>
+        <div class="modal-preview" id="modalPreview">
+          <div class="modal-preview-row">
+            <span class="modal-preview-label">Expected range</span>
+            <span class="modal-preview-value" id="modalPreviewRange">— km</span>
+          </div>
+          <div class="modal-preview-row">
+            <span class="modal-preview-label">END EST.</span>
+            <span class="modal-preview-value modal-preview-endest" id="modalPreviewEndEst">—</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="modalReset">Reset</button>
+        <button type="button" class="btn btn-primary" id="modalSaveStart" onclick="window.__evHideModalAndStart()">Save and Start</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Charger add-stop modal -->
+  <div id="chargerModalOverlay" class="modal-overlay confirm-overlay" style="display:none;">
+    <div class="confirm-box charger-modal-box">
+      <p class="charger-modal-title" id="chargerModalTitle">Add charging stop</p>
+      <p id="chargerModalArrivalText" class="charger-arrival-text">Estimated battery on arrival: —%. Charge to (slider)%. Remaining you can add: up to —%.</p>
+      <div class="charger-slider-wrap">
+        <input type="range" id="chargerAddPercent" min="10" max="100" value="80">
+        <span id="chargerAddPercentVal">80</span>%
+      </div>
+      <p id="chargerModalCostText" class="charger-cost-text">Est. cost (DC fast): <strong id="chargerModalCostVal">—</strong> EGP</p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="chargerModalCancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="chargerModalOk">OK – Add stop & recalculate</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirm dialog -->
+  <div id="confirmOverlay" class="confirm-overlay">
+    <div class="confirm-box">
+      <p id="confirmMessage">Confirm action?</p>
+      <button type="button" class="btn btn-primary" id="confirmOk">OK</button>
+      <button type="button" class="btn btn-secondary" id="confirmCancel">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Route selection modal -->
+  <div id="routeSelectOverlay" class="modal-overlay confirm-overlay route-select-overlay">
+    <div class="confirm-box route-select-box">
+      <p class="route-select-title">CHOOSE ROUTE</p>
+      <p class="route-select-sub">Pick a route and click OK, or Cancel.</p>
+      <div id="routeSelectList" class="route-select-list"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="routeSelectCancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="routeSelectOk">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main layout -->
+  <header class="app-header">
+    <span class="app-title">EV TRIP PLANNER</span>
+    <div class="header-controls">
+      <div class="theme-color-box" title="Theme accent color">
+        <label class="theme-color-label">Theme:</label>
+        <select id="themeColorSelect" class="theme-color-select" aria-label="Accent color">
+          <option value="blue">Blue</option>
+          <option value="green" selected>Green</option>
+          <option value="red">Red</option>
+          <option value="purple">Purple</option>
+          <option value="pink">Pink</option>
+        </select>
+      </div>
+      <button type="button" class="btn-theme" id="themeToggle" title="Toggle dark/light theme">Map: Dark</button>
+      <button type="button" class="btn-theme" id="tripSetupBtn" title="Vehicle & trip settings">Trip setup</button>
+      <button type="button" class="header-btn header-btn-cancel" id="btnCancelTrip" title="Cancel current trip">Cancel Trip</button>
+      <button type="button" class="header-btn header-btn-restart" id="btnRestart" title="Restart trip">Restart</button>
+      <button type="button" class="header-btn header-btn-refresh" id="btnRefresh" title="Refresh">Refresh</button>
+      <button type="button" class="header-btn header-btn-recalc" id="btnRecalculate" title="Recalculate route">Recalculate</button>
+      <button type="button" class="header-btn header-btn-replan" id="btnReplan" title="Re-plan from scratch">Re-plan</button>
+    </div>
+    <div class="header-stats">
+      <span>TRIP CALCULATION & ROUTE PLANNING</span>
+      <span>BATTERY LEVEL: <span id="headerBattery" class="stat-value">82</span>%</span>
+      <span>RANGE: <span id="headerRange" class="stat-value">245</span> KM</span>
+      <span>CHARGING MODE: <span id="headerChargingMode" class="stat-value">FAST</span></span>
+    </div>
+  </header>
+
+  <div class="app-content">
+    <div class="map-row">
+      <div class="left-sidebar panel">
+        <div class="route-options-panel">
+          <section class="route-planning-section route-inputs">
+            <div class="panel-title">ROUTE PLANNING</div>
+            <div class="field-row address-bar-row">
+              <label>Start location</label>
+              <div class="input-wrap address-bar">
+                <input type="text" id="startLocation" placeholder="Search or pin on map…" autocomplete="off" dir="auto">
+                <button type="button" class="pin-btn start-pin" id="pinStart" title="Pin on map">📍</button>
+                <button type="button" class="btn-icon use-current" id="useCurrentStart" title="Use current location">⌖</button>
+              </div>
+              <div id="startDropdown" class="search-dropdown"></div>
+            </div>
+            <div class="field-row address-bar-row">
+              <label>Destination</label>
+              <div class="input-wrap address-bar">
+                <input type="text" id="destination" placeholder="Search or pin on map…" autocomplete="off" dir="auto">
+                <button type="button" class="pin-btn dest-pin" id="pinDest" title="Pin on map">📍</button>
+                <button type="button" class="btn-icon use-current" id="useCurrentDest" title="Use current location">⌖</button>
+              </div>
+              <div id="destDropdown" class="search-dropdown"></div>
+            </div>
+            <div class="plan-route-actions">
+              <button type="button" class="btn btn-primary plan-route-btn" id="planRouteBtn">Plan Route</button>
+              <button type="button" class="btn btn-primary btn-start-nav" id="startNavBtn" style="display:none;">Start</button>
+              <button type="button" class="btn btn-secondary btn-stop-route" id="stopRouteBtn" style="display:none;">Stop route</button>
+            </div>
+            <button type="button" class="add-stop-btn" id="addStopBtn">+ Add stop</button>
+            <div id="stopsList" class="stops-list-compact"></div>
+          </section>
+          <section class="route-planning-section chargers-section">
+            <div class="panel-title">Chargers along route (10 km)</div>
+            <p class="chargers-hint">Click blue pin to add stop</p>
+            <div id="chargerList" class="charger-list-compact"></div>
+          </section>
+        </div>
+      </div>
+
+      <section class="map-section map-section-hidden" id="mapSection">
+        <div class="map-container">
+          <div id="map" aria-label="Route map"></div>
+          <div class="map-placeholder" id="mapPlaceholder">Loading map…</div>
+          <div class="speed-sign-overlay" id="speedSignOverlay">
+            <div class="speed-sign-inner">
+              <span class="speed-sign-value" id="speedSignValue">—</span>
+              <span class="speed-sign-unit">km/h</span>
+            </div>
+            <div class="speed-sign-slowdown" id="speedSignSlowdown">Slow Down (Above planned speed)</div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="right-sidebar right-panel panel">
+      <div class="panel-title">ROUTE & ESTIMATED READINGS</div>
+      <div class="route-stats-inline">
+        <span>TOTAL DISTANCE: <strong id="routeTotalDistance">—</strong> KM</span>
+        <span>EST. TRAVEL TIME: <strong id="routeTravelTime">—</strong></span>
+        <span>CHARGING STOPS: <strong id="routeChargingStops">0</strong></span>
+      </div>
+      <div class="battery-sidebar-inline">
+        <div class="battery-bar-vertical">
+          <div class="fill" id="batteryFill"></div>
+          <span class="pct" id="batteryPct">82%</span>
+        </div>
+        <div class="est-range-label">ACR RANGE: <span class="est-range-value" id="estRangeValue">245 KM</span></div>
+      </div>
+      <div class="panel-title">TRIP SUMMARY</div>
+      <ul id="tripSummaryList" class="trip-summary-list">
+        <li><span class="label">TOTAL DISTANCE</span><span class="value">—</span></li>
+        <li><span class="label">TRAVEL TIME</span><span class="value">—</span></li>
+        <li><span class="label">CHARGING TIME</span><span class="value">0M</span></li>
+        <li><span class="label">COST ESTIMATE</span><span class="value">—</span></li>
+      </ul>
+      <div class="vehicle-preview">
+        <img id="vehiclePreviewImg" src="assets/car-sedan.svg" alt="Vehicle">
+      </div>
+      <div class="panel-title">DEMO SIMULATION</div>
+      <div class="demo-controls">
+        <button type="button" class="btn btn-primary" id="runDemoBtn">Run Demo</button>
+        <button type="button" class="btn btn-secondary" id="stopDemoBtn" style="display:none;">Stop Demo</button>
+        <div class="demo-field">
+          <label>Car speed (km/h)</label>
+          <input type="range" id="demoCarSpeed" min="20" max="160" value="80">
+          <span id="demoCarSpeedVal">80</span>
+        </div>
+        <div class="demo-field">
+          <label>Simulation speed</label>
+          <input type="range" id="demoSimSpeed" min="1" max="20" value="5">
+          <span id="demoSimSpeedVal">5×</span>
+        </div>
+      </div>
+      </aside>
+    </div>
+
+    <div class="info-panel-above-progress">
+      <div class="info-panel-grid">
+        <div class="info-panel-section info-tips animate-fade-in">
+          <div class="info-panel-title">Tips: Lower consumption & better charge</div>
+          <ul class="info-tips-list" id="infoTipsList"></ul>
+        </div>
+        <div class="info-panel-section info-quick animate-fade-in animate-delay-1">
+          <div class="info-panel-title">Quick reference</div>
+          <ul class="info-quick-list">
+            <li>Green bar = safe zone to destination</li>
+            <li>Red bar = battery would reach 0% before arrival</li>
+            <li>Zero Charge pin = where battery hits 0%</li>
+            <li>Blue pins = charging stops along route</li>
+            <li>Select start, end & stops → click <strong>Plan Route</strong></li>
+          </ul>
+        </div>
+        <div class="info-panel-section info-status animate-fade-in animate-delay-2">
+          <div class="info-panel-title">Route status</div>
+          <p class="info-status-text" id="infoRouteStatus">Enter start and destination, then click Plan Route.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="energy-progress-wrap" id="energyProgressWrap">
+      <div class="energy-progress-title">
+        <span class="energy-current-label">CURRENT CHARGE <span class="energy-progress-start energy-big-pct energy-3d-battery" id="energyStartPct">100%</span></span>
+        <span class="energy-progress-end" id="energyProgressEndEst">—</span>
+      </div>
+      <div class="energy-bar-container">
+        <div class="energy-bar-fill"></div>
+        <div class="energy-bar-red-segment" id="energyBarRedSegment"></div>
+        <div class="energy-bar-zero-pin-wrap" id="energyBarZeroPinWrap" title="Zero charge point">
+          <div class="energy-bar-zero-pin" id="energyBarZeroPin"></div>
+        </div>
+        <div id="energyBarChargePins" class="energy-bar-charge-pins"></div>
+        <div class="energy-bar-car" style="left: 0%;" id="energyBarCar"></div>
+        <span class="energy-bar-warning" style="display:none;" id="energyBarWarning">Battery Empty</span>
+      </div>
+    </div>
+
+    <div class="bottom-bar">
+      <div class="bottom-bar-cell">
+        <div class="cell-label">EXPECTED RANGE</div>
+        <div class="cell-value" id="bottomExpectedRange">— KM</div>
+        <div class="cell-sub">Based on trip setup & vehicle</div>
+      </div>
+      <div class="bottom-bar-cell">
+        <div class="cell-label">NEXT CHARGING STOP</div>
+        <div class="cell-value" id="bottomNextStop">— KM</div>
+        <div class="cell-sub">ETA: <span id="bottomEta">—</span></div>
+      </div>
+      <div class="bottom-bar-cell">
+        <div class="cell-label">CHARGING TIME</div>
+        <div class="cell-value" id="bottomChargingTime">0M</div>
+      </div>
+      <div class="bottom-bar-cell">
+        <div class="cell-label">EXPECTED ARRIVAL</div>
+        <div class="cell-value" id="bottomArrival">—</div>
+        <div class="cell-sub">ARRIVAL TIME</div>
+      </div>
+      <div class="bottom-bar-cell bottom-bar-weather">
+        <div class="cell-label">WEATHER FORECAST</div>
+        <div class="cell-value"><span id="bottomWeatherTemp">—</span> °C</div>
+        <div class="cell-sub"><span id="bottomWeatherCond">—</span></div>
+        <div class="cell-sub"><span id="bottomWeatherHumidity">—</span> · Wind <span id="bottomWeatherWind">—</span></div>
+      </div>
+      <div class="bottom-bar-cell">
+        <div class="cell-label">END EST.</div>
+        <div class="cell-value" id="bottomEndEst">—</div>
+        <div class="cell-sub">Battery at destination</div>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.19.0/mapbox-gl.js"></script>
+  <script>
+    if (window.mapboxgl && window.mapboxgl.setRTLTextPlugin) {
+      try {
+        window.mapboxgl.setRTLTextPlugin(
+          'https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-rtl-text/v0.3.0/mapbox-gl-rtl-text.js',
+          null,
+          true
+        );
+      } catch (e) {}
+    }
+  </script>
+  <script src="js/config.js"></script>
+  <script src="data/embedded.js"></script>
+  <script src="js/data-loader.js"></script>
+  <script src="js/weather.js"></script>
+  <script src="js/search.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/routing.js"></script>
+  <script src="js/trip.js"></script>
+  <script src="js/energy-bar.js"></script>
+  <script src="js/chargers.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    try {
+      var carEl = document.getElementById('energyBarCar');
+      if (carEl && window.EVTripPlannerEnergyBar && window.EVTripPlannerEnergyBar.carIconSVG) carEl.innerHTML = window.EVTripPlannerEnergyBar.carIconSVG();
+    } catch (e) {}
+  </script>
+  <script>
+    window.__evHideModalAndStart = function() {
+      var modal = document.getElementById('startupModal');
+      if (modal) { modal.style.display = 'none'; modal.classList.add('hidden'); modal.setAttribute('aria-hidden', 'true'); }
+      var mapEl = document.getElementById('map');
+      var hasMap = window.EVTripPlannerMap && window.EVTripPlannerMap.getMap && window.EVTripPlannerMap.getMap();
+      if (!hasMap && window.mapboxgl && mapEl && window.EVTripPlannerConfig && window.EVTripPlannerConfig.mapbox) {
+        var c = window.EVTripPlannerConfig.mapbox;
+        var token = c.accessToken;
+        var hour = new Date().getHours();
+        var isDark = hour < 6 || hour >= 18;
+        var root = document.documentElement;
+        root.classList.remove('theme-dark', 'theme-light');
+        root.classList.add(isDark ? 'theme-dark' : 'theme-light');
+        var style = isDark ? (c.nightStyle || 'mapbox://styles/mapbox/dark-v11') : (c.dayStyle || 'mapbox://styles/mapbox/light-v11');
+        if (token && token !== 'YOUR_MAPBOX_ACCESS_TOKEN') {
+          window.mapboxgl.accessToken = token;
+          var m = new window.mapboxgl.Map({ container: 'map', style: style, center: [31.2357, 30.0444], zoom: 10 });
+          mapEl._mapboxMap = m;
+          m.addControl(new window.mapboxgl.NavigationControl(), 'top-right');
+          m.addControl(new window.mapboxgl.GeolocateControl({
+            positionOptions: { enableHighAccuracy: true },
+            trackUserLocation: true,
+            showUserHeading: true
+          }), 'top-right');
+          m.on('load', function() {
+            var ph = document.getElementById('mapPlaceholder');
+            if (ph) ph.style.display = 'none';
+            if (m.resize) m.resize();
+            if (navigator.geolocation) {
+              navigator.geolocation.getCurrentPosition(
+                function(pos) {
+                  var lng = pos.coords.longitude, lat = pos.coords.latitude;
+                  if (window.EVTripPlannerMap && window.EVTripPlannerMap.setUserLocation) window.EVTripPlannerMap.setUserLocation(lng, lat);
+                  m.flyTo({ center: [lng, lat], zoom: 14, duration: 1500 });
+                },
+                function() {},
+                { enableHighAccuracy: true, timeout: 10000 }
+              );
+            }
+          });
+          if (window.EVTripPlannerMap && typeof window.EVTripPlannerMap._setMap === 'function') window.EVTripPlannerMap._setMap(m);
+          if (window.EVTripPlannerMap && typeof window.EVTripPlannerMap.setStyle === 'function') window.EVTripPlannerMap.setStyle(isDark ? 'night' : 'day');
+          window.__evMapboxMap = m;
+        }
+      }
+      if (window.EVTripPlannerApp && window.EVTripPlannerApp.doSaveAndStart) {
+        try { window.EVTripPlannerApp.doSaveAndStart(); } catch (e) { console.error(e); }
+      }
+    };
+    window.__evApplyMapTheme = null;
+    (function bindThemeToggle() {
+      var btn = document.getElementById('themeToggle');
+      if (!btn) return;
+      btn.addEventListener('click', function () {
+        var root = document.documentElement;
+        var isLight = root.classList.contains('theme-light');
+        var willBeDark = isLight;
+        root.classList.remove('theme-dark', 'theme-light');
+        root.classList.add(willBeDark ? 'theme-dark' : 'theme-light');
+        btn.textContent = willBeDark ? 'Map: Dark' : 'Map: Light';
+        if (window.__evApplyMapTheme) window.__evApplyMapTheme(willBeDark);
+      });
+    })();
+    (function bindModalButtons() {
+      var modal = document.getElementById('startupModal');
+      var vehicleModal = modal ? modal.querySelector('.vehicle-modal') : null;
+      function syncModalTheme() {
+        if (!modal || !vehicleModal) return;
+        var isLight = document.documentElement.classList.contains('theme-light');
+        vehicleModal.classList.remove('theme-modal-dark', 'theme-modal-light');
+        vehicleModal.classList.add(isLight ? 'theme-modal-light' : 'theme-modal-dark');
+        modal.classList.remove('theme-modal-dark', 'theme-modal-light');
+        modal.classList.add(isLight ? 'theme-modal-light' : 'theme-modal-dark');
+      }
+      function showModal() {
+        if (!modal) return;
+        if (window.EVTripPlannerApp) {
+          if (window.EVTripPlannerApp.syncModalFromState) window.EVTripPlannerApp.syncModalFromState();
+          if (window.EVTripPlannerApp.updateModalPreview) window.EVTripPlannerApp.updateModalPreview();
+        }
+        syncModalTheme();
+        modal.style.display = 'flex';
+        modal.classList.remove('hidden');
+        modal.removeAttribute('aria-hidden');
+      }
+      var saveBtn = document.getElementById('modalSaveStart');
+      if (saveBtn) saveBtn.addEventListener('click', window.__evHideModalAndStart);
+      var tripSetupBtn = document.getElementById('tripSetupBtn');
+      if (tripSetupBtn) tripSetupBtn.addEventListener('click', showModal);
+      syncModalTheme();
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+EV Trip Planner - How to run
+===========================
+
+You MUST open the app over HTTP, not by double-clicking the HTML file.
+
+1. Open a terminal in this folder (ev-trip-planner).
+
+2. Start a local server, for example:
+   - Node:    npx serve
+   - Python:  python -m http.server 8080
+
+3. In your browser go to:
+   - If you used npx serve:  http://localhost:3000
+   - If you used Python:     http://localhost:8080
+
+4. You should see the map at the top and all buttons clickable.
+   Use "Trip setup" in the header to open vehicle/trip settings.
+
+If you open index.html as a file (file:///...), the map and some features will not work.

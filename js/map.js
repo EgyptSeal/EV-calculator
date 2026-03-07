@@ -8,15 +8,23 @@
   let userLocation = null;
   let markers = { start: null, end: null, chargers: [], chargeStops: [], demoCar: null, navCar: null };
   let lastCarTurnOffset = 0;
+  let lastNavCarLng = null;
+  let lastNavCarLat = null;
+  let navCarTweenId = null;
+  let navCarTarget = null;
   let navigationMode = false;
+  var NAV_CAR_TWEEN_MS = 280;
   let previewBlinkInterval = null;
 
   var FALLBACK_STYLE_DAY = 'mapbox://styles/mapbox/light-v11';
   var FALLBACK_STYLE_NIGHT = 'mapbox://styles/mapbox/dark-v11';
   var FOLLOW_ZOOM = 18.5;
   var FOLLOW_PITCH = 50;
+  var FOLLOW_PITCH_MOVING = 68;
+  var FOLLOW_PITCH_STOPPED = 48;
   var FOLLOW_DURATION_MS = 450;
-  var FOLLOW_OFFSET_Y = -80;
+  var FOLLOW_OFFSET_Y = 70;
+  var FOLLOW_CENTER_AHEAD_KM = 0.04;
 
   function styleUrl(which) {
     if (which === 'night') return (C.nightStyle || FALLBACK_STYLE_NIGHT);
@@ -104,8 +112,8 @@
           });
           if (!map._evCarZoomHandler) {
             map._evCarZoomHandler = true;
-            map.on('zoom', function () { updateMarkerScales(); updateCarMarkerSizes(); });
-            map.on('zoomend', function () { updateMarkerScales(); updateCarMarkerSizes(); });
+            map.on('zoom', function () { updateMarkerScales(); });
+            map.on('zoomend', function () { updateMarkerScales(); });
           }
           onLoaded();
         });
@@ -179,13 +187,21 @@
     map.fitBounds(padded, { duration: 800, padding: 40, maxZoom: 14 });
   }
 
+  var ROUTE_LINE_COLOR_DARK = '#00e5ff';
+  var ROUTE_LINE_COLOR_LIGHT = '#42a5f5';
+
+  function getRouteLineColor() {
+    var isDark = document.documentElement.classList.contains('theme-dark');
+    return isDark ? ROUTE_LINE_COLOR_DARK : ROUTE_LINE_COLOR_LIGHT;
+  }
+
   function addSourceAndLayer(id, geoJSON, lineColor, lineWidth) {
     if (!map) return;
-    var lightBlue = '#5dd4ff';
-    var color = lightBlue;
     var width = lineWidth != null ? lineWidth : 4;
+    var lineColorUse = id === 'ev-trip-route' ? getRouteLineColor() : ROUTE_LINE_COLOR_DARK;
     if (map.getSource(id)) {
       map.getSource(id).setData(geoJSON);
+      if (map.getLayer(id + '-line')) map.setPaintProperty(id + '-line', 'line-color', lineColorUse);
       return;
     }
     map.addSource(id, { type: 'geojson', data: geoJSON });
@@ -194,7 +210,7 @@
       type: 'line',
       source: id,
       layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': color, 'line-width': width },
+      paint: { 'line-color': lineColorUse, 'line-width': width },
     });
   }
 
@@ -207,9 +223,8 @@
   function drawRoutePreview(geoJSON, lineColor) {
     if (!map || !geoJSON || !geoJSON.geometry) return;
     stopRoutePreview();
-    var color = '#5dd4ff';
     var coords = geoJSON.geometry.coordinates || [];
-    addSourceAndLayer('route-preview', geoJSON, color, 6);
+    addSourceAndLayer('route-preview', geoJSON, ROUTE_LINE_COLOR_DARK, 6);
     if (coords.length > 0) fitBounds(coords, 0.25);
     var mapEl = getMap();
     if (mapEl && mapEl.resize) setTimeout(function () { mapEl.resize(); fitBounds(coords, 0.25); }, 150);
@@ -243,22 +258,11 @@
     return Math.max(0.5, Math.min(1.8, 0.5 + (zoom - 6) * 0.08));
   }
 
-  /** Real-world car size: ~4.5m. Returns pixel size for car icon at given zoom/lat. */
-  function carPixelSizeFromZoom(zoom, lat) {
-    if (zoom == null) return 48;
-    lat = lat != null ? lat : 30;
-    var metersPerPixel = (2 * Math.PI * 6378137) / (256 * Math.pow(2, zoom)) * Math.cos(lat * Math.PI / 180);
-    var carMeters = 4.5;
-    var px = Math.round((carMeters / metersPerPixel));
-    return Math.max(24, Math.min(120, px));
-  }
+  var FIXED_CAR_MARKER_SIZE_PX = 36;
 
   function updateCarMarkerSizes() {
     if (!map) return;
-    var zoom = map.getZoom ? map.getZoom() : 16;
-    var center = map.getCenter ? map.getCenter() : null;
-    var lat = center && center.lat != null ? center.lat : 30;
-    var size = carPixelSizeFromZoom(zoom, lat);
+    var size = FIXED_CAR_MARKER_SIZE_PX;
     [markers.navCar, markers.demoCar].forEach(function (m) {
       if (m && m.getElement) {
         var el = m.getElement();
@@ -327,7 +331,7 @@
     wrap.appendChild(el);
     const marker = new mapboxgl.Marker({ element: wrap }).setLngLat(lngLat).addTo(map);
     if (map.on) {
-      var onZoom = function () { updateMarkerScales(); updateCarMarkerSizes(); };
+      var onZoom = function () { updateMarkerScales(); };
       if (!map._evMarkerZoomHandler) {
         map._evMarkerZoomHandler = true;
         map.on('zoom', onZoom);
@@ -445,13 +449,22 @@
     el.style.transform = 'rotate(' + lastCarTurnOffset + 'deg)';
   }
 
-  /** Follow car with smooth easing (Google Maps style). Offset puts car slightly below center to show road ahead. */
-  function followCar(lng, lat, bearing, forceFollow) {
+  /** Follow car: camera behind car (center point ahead of car), car above bottom line, strong tilt. */
+  function followCar(lng, lat, bearing, forceFollow, speedKmh) {
     if (!map || (!navigationMode && !forceFollow)) return;
+    var pitch = (speedKmh != null && speedKmh > 20) ? FOLLOW_PITCH_MOVING : FOLLOW_PITCH_STOPPED;
+    var centerLng = lng;
+    var centerLat = lat;
+    if (bearing != null && !isNaN(bearing) && FOLLOW_CENTER_AHEAD_KM > 0) {
+      var rad = (bearing * Math.PI) / 180;
+      var latRad = (lat * Math.PI) / 180;
+      centerLng = lng + (FOLLOW_CENTER_AHEAD_KM / 111.32) * Math.sin(rad) / Math.cos(latRad);
+      centerLat = lat + (FOLLOW_CENTER_AHEAD_KM / 110.54) * Math.cos(rad);
+    }
     var opts = {
-      center: [lng, lat],
+      center: [centerLng, centerLat],
       zoom: FOLLOW_ZOOM,
-      pitch: FOLLOW_PITCH,
+      pitch: pitch,
       duration: FOLLOW_DURATION_MS,
       essential: true,
       offset: [0, FOLLOW_OFFSET_Y],
@@ -500,20 +513,62 @@
 
   function setNavigationCarPosition(lng, lat, bearing, turnOffsetDeg) {
     if (!map) return;
+    var mapboxgl = global.mapboxgl || (typeof window !== 'undefined' && window.mapboxgl);
+    if (!mapboxgl) return;
     if (!markers.navCar) {
       const wrap = createCarMarkerElement('nav-car-marker');
-      var mapboxgl = global.mapboxgl || (typeof window !== 'undefined' && window.mapboxgl);
-      if (!mapboxgl) return;
       markers.navCar = new mapboxgl.Marker({ element: wrap, anchor: 'center' })
         .setLngLat([lng, lat])
         .addTo(map);
+      lastNavCarLng = lng;
+      lastNavCarLat = lat;
+      setCarMarkerRotation(markers.navCar, turnOffsetDeg);
+      updateCarMarkerSizes();
+      return;
     }
-    markers.navCar.setLngLat([lng, lat]);
-    setCarMarkerRotation(markers.navCar, turnOffsetDeg);
+    if (navCarTweenId != null) {
+      cancelAnimationFrame(navCarTweenId);
+      navCarTweenId = null;
+    }
+    if (lastNavCarLng == null || lastNavCarLat == null) {
+      var cur = markers.navCar.getLngLat();
+      lastNavCarLng = cur.lng;
+      lastNavCarLat = cur.lat;
+    }
+    var startLng = lastNavCarLng;
+    var startLat = lastNavCarLat;
+    navCarTarget = { lng: lng, lat: lat, turnOffsetDeg: turnOffsetDeg };
+    var startTime = null;
+    function step(now) {
+      if (!startTime) startTime = now;
+      var elapsed = now - startTime;
+      var t = Math.min(1, elapsed / NAV_CAR_TWEEN_MS);
+      t = t * t * (3 - 2 * t);
+      var curLng = startLng + (lng - startLng) * t;
+      var curLat = startLat + (lat - startLat) * t;
+      markers.navCar.setLngLat([curLng, curLat]);
+      var turnT = turnOffsetDeg != null ? turnOffsetDeg : lastCarTurnOffset;
+      setCarMarkerRotation(markers.navCar, turnT);
+      if (t < 1) {
+        navCarTweenId = requestAnimationFrame(step);
+      } else {
+        navCarTweenId = null;
+        lastNavCarLng = lng;
+        lastNavCarLat = lat;
+      }
+    }
+    navCarTweenId = requestAnimationFrame(step);
     updateCarMarkerSizes();
   }
 
   function clearNavigationCar() {
+    if (navCarTweenId != null) {
+      cancelAnimationFrame(navCarTweenId);
+      navCarTweenId = null;
+    }
+    lastNavCarLng = null;
+    lastNavCarLat = null;
+    navCarTarget = null;
     if (markers.navCar) {
       markers.navCar.remove();
       markers.navCar = null;

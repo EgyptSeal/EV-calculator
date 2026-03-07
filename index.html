@@ -36,8 +36,8 @@
               <span class="ac-toggle-track">
                 <span class="ac-toggle-thumb"></span>
               </span>
-              <span class="ac-toggle-label ac-label-off">AC OFF</span>
-              <span class="ac-toggle-label ac-label-on">AC ON</span>
+              <span class="ac-toggle-label ac-label-off">AC ON</span>
+              <span class="ac-toggle-label ac-label-on">AC OFF</span>
             </div>
           </div>
           <div class="modal-field">
@@ -144,7 +144,7 @@
       <button type="button" class="header-btn header-btn-cancel" id="btnCancelTrip" title="Cancel current trip">Cancel Trip</button>
       <button type="button" class="header-btn header-btn-restart" id="btnRestart" title="Restart trip">Restart</button>
       <button type="button" class="header-btn header-btn-refresh" id="btnRefresh" title="Refresh">Refresh</button>
-      <button type="button" class="header-btn header-btn-recalc" id="btnRecalculate" title="Recalculate route">Recalculate</button>
+      <button type="button" class="header-btn header-btn-fullscreen" id="btnFullscreen" title="Toggle fullscreen">Full screen</button>
       <button type="button" class="header-btn header-btn-replan" id="btnReplan" title="Re-plan from scratch">Re-plan</button>
     </div>
     <div class="header-stats">
@@ -164,19 +164,21 @@
             <div class="field-row address-bar-row">
               <label>Start location</label>
               <div class="input-wrap address-bar">
-                <input type="text" id="startLocation" placeholder="Search or pin on map…" autocomplete="off" dir="auto">
+                <input type="text" id="startLocation" placeholder="e.g. city, street, or pin on map" autocomplete="off" dir="auto">
                 <button type="button" class="pin-btn start-pin" id="pinStart" title="Pin on map">📍</button>
                 <button type="button" class="btn-icon use-current" id="useCurrentStart" title="Use current location">⌖</button>
               </div>
+              <p class="address-bar-hint" id="startLocationHint">Type 2+ characters for place suggestions</p>
               <div id="startDropdown" class="search-dropdown"></div>
             </div>
             <div class="field-row address-bar-row">
               <label>Destination</label>
               <div class="input-wrap address-bar">
-                <input type="text" id="destination" placeholder="Search or pin on map…" autocomplete="off" dir="auto">
+                <input type="text" id="destination" placeholder="e.g. city, street, or pin on map" autocomplete="off" dir="auto">
                 <button type="button" class="pin-btn dest-pin" id="pinDest" title="Pin on map">📍</button>
                 <button type="button" class="btn-icon use-current" id="useCurrentDest" title="Use current location">⌖</button>
               </div>
+              <p class="address-bar-hint" id="destLocationHint">Type 2+ characters for place suggestions</p>
               <div id="destDropdown" class="search-dropdown"></div>
             </div>
             <div class="plan-route-actions">
@@ -241,13 +243,26 @@
         <button type="button" class="btn btn-secondary" id="stopDemoBtn" style="display:none;">Stop Demo</button>
         <div class="demo-field">
           <label>Car speed (km/h)</label>
-          <input type="range" id="demoCarSpeed" min="20" max="160" value="80">
-          <span id="demoCarSpeedVal">80</span>
+          <input type="range" id="demoCarSpeed" min="20" max="160" value="20">
+          <span id="demoCarSpeedVal">20</span>
         </div>
         <div class="demo-field">
           <label>Simulation speed</label>
-          <input type="range" id="demoSimSpeed" min="1" max="20" value="5">
-          <span id="demoSimSpeedVal">5×</span>
+          <input type="range" id="demoSimSpeed" min="1" max="20" value="1">
+          <span id="demoSimSpeedVal">1×</span>
+        </div>
+        <div class="demo-move-buttons" id="demoMoveButtons" style="display:none;">
+          <label>Move car</label>
+          <div class="demo-move-row">
+            <button type="button" class="btn btn-icon demo-move-btn" id="demoMoveForward" title="Forward">▲</button>
+          </div>
+          <div class="demo-move-row">
+            <button type="button" class="btn btn-icon demo-move-btn" id="demoMoveLeft" title="Left">◀</button>
+            <button type="button" class="btn btn-icon demo-move-btn" id="demoMoveRight" title="Right">▶</button>
+          </div>
+          <div class="demo-move-row">
+            <button type="button" class="btn btn-icon demo-move-btn" id="demoMoveBackward" title="Backward">▼</button>
+          </div>
         </div>
       </div>
       </aside>
@@ -256,31 +271,32 @@
     <div class="info-panel-above-progress">
       <div class="info-panel-grid">
         <div class="info-panel-section info-tips animate-fade-in">
-          <div class="info-panel-title">Tips: Lower consumption & better charge</div>
-          <ul class="info-tips-list">
-            <li><strong>Eco mode</strong> – ~15% more range vs Standard</li>
-            <li><strong>Reduce speed</strong> – 90–100 km/h adds 20–30% range</li>
-            <li><strong>Minimize AC gap</strong> – Set cabin temp close to ambient</li>
-            <li><strong>Precondition plugged in</strong> – Heat/cool before unplugging</li>
-            <li><strong>Lighten load</strong> – ~4 km per 40 kg extra</li>
-            <li><strong>Regen braking</strong> – Anticipate stops to recover energy</li>
-            <li><strong>Tire pressure</strong> – Keep at recommended level</li>
-            <li><strong>Charge 20–80%</strong> – Often fastest charging range</li>
-          </ul>
+          <div class="info-panel-title">Tips</div>
+          <div class="info-panel-marquee">
+            <div class="info-panel-scroll" id="infoTipsScroll">
+              <span class="info-tips-inline" id="infoTipsInline1"></span>
+              <span class="info-tips-inline" id="infoTipsInline2" aria-hidden="true"></span>
+            </div>
+          </div>
         </div>
         <div class="info-panel-section info-quick animate-fade-in animate-delay-1">
           <div class="info-panel-title">Quick reference</div>
-          <ul class="info-quick-list">
-            <li>Green bar = safe zone to destination</li>
-            <li>Red bar = battery would reach 0% before arrival</li>
-            <li>Zero Charge pin = where battery hits 0%</li>
-            <li>Blue pins = charging stops along route</li>
-            <li>Select start, end & stops → click <strong>Plan Route</strong></li>
-          </ul>
+          <div class="info-panel-marquee">
+            <div class="info-panel-scroll">
+              <span class="info-quick-inline">Green bar = safe zone · Red bar = battery 0% before arrival · Zero Charge pin · Blue pins = charging stops · Plan Route</span>
+              <span class="info-quick-inline" aria-hidden="true">Green bar = safe zone · Red bar = battery 0% before arrival · Zero Charge pin · Blue pins = charging stops · Plan Route &nbsp;&nbsp;&nbsp;◆&nbsp;&nbsp;&nbsp;</span>
+            </div>
+          </div>
         </div>
         <div class="info-panel-section info-status animate-fade-in animate-delay-2">
           <div class="info-panel-title">Route status</div>
-          <p class="info-status-text" id="infoRouteStatus">Enter start and destination, then click Plan Route.</p>
+          <div class="info-panel-marquee">
+            <div class="info-panel-scroll info-status-scroll">
+              <span id="infoRouteStatus">Enter start and destination, then click Plan Route.</span>
+              <span aria-hidden="true">&nbsp;&nbsp;&nbsp;◆&nbsp;&nbsp;&nbsp;</span>
+              <span id="infoRouteStatusCopy" aria-hidden="true"></span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -353,8 +369,8 @@
   <script src="js/data-loader.js"></script>
   <script src="js/weather.js"></script>
   <script src="js/search.js"></script>
-  <script src="js/map.js"></script>
-  <script src="js/routing.js"></script>
+  <script src="js/map.js?v=4"></script>
+  <script src="js/routing.js?v=4"></script>
   <script src="js/trip.js"></script>
   <script src="js/energy-bar.js"></script>
   <script src="js/chargers.js"></script>

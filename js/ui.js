@@ -43,10 +43,14 @@
     return R * c;
   }
 
-  function setupSearchInput(inputId, dropdownId, onSelect, getFromCoords, getExtraPlaces) {
+  function setupSearchInput(inputId, dropdownId, onSelect, getFromCoords, getExtraPlaces, hintId) {
     var input = document.getElementById(inputId);
     var dropdown = document.getElementById(dropdownId);
     if (!input || !dropdown) return;
+    var hintEl = hintId ? document.getElementById(hintId) : null;
+    function setHint(text) {
+      if (hintEl) hintEl.textContent = text;
+    }
 
     function renderResults(results, from) {
       dropdown.innerHTML = '';
@@ -83,10 +87,12 @@
     var searchFn = Search.debounce(function () {
       var q = input.value.trim();
       if (q.length < 2) {
+        setHint('Type 2+ characters for place suggestions');
         dropdown.innerHTML = '';
         dropdown.classList.remove('show');
         return;
       }
+      setHint('Select a suggestion below or pin on map');
       dropdown.innerHTML = '<div class="search-dropdown-item search-dropdown-searching" style="color:var(--text-secondary)">Searching…</div>';
       dropdown.classList.add('show');
       var from = (typeof getFromCoords === 'function') ? getFromCoords() : null;
@@ -115,8 +121,15 @@
       }).catch(function () { renderResults([], from); });
     }, 400);
 
-    input.addEventListener('input', searchFn);
-    input.addEventListener('focus', function () { if (dropdown.children.length) dropdown.classList.add('show'); });
+    input.addEventListener('input', function () {
+      if (input.value.trim().length >= 2) setHint('Select a suggestion below or pin on map');
+      else setHint('Type 2+ characters for place suggestions');
+      searchFn();
+    });
+    input.addEventListener('focus', function () {
+      if (input.value.trim().length >= 2) setHint('Select a suggestion below or pin on map');
+      if (dropdown.children.length) dropdown.classList.add('show');
+    });
     document.addEventListener('click', function (e) {
       if (!input.contains(e.target) && !dropdown.contains(e.target)) dropdown.classList.remove('show');
     });
@@ -124,9 +137,9 @@
 
   function updateHeaderStats(batteryPercent, rangeKm, chargingMode) {
     const el = document.getElementById('headerBattery');
-    if (el) el.textContent = batteryPercent + '%';
+    if (el) el.textContent = (batteryPercent != null ? Math.round(batteryPercent) : '—') + '%';
     const rangeEl = document.getElementById('headerRange');
-    if (rangeEl) rangeEl.textContent = (rangeKm != null ? Math.round(rangeKm) : '—') + ' KM';
+    if (rangeEl) rangeEl.textContent = (rangeKm != null && !isNaN(rangeKm) ? Math.round(rangeKm) : '—') + ' KM';
     const modeEl = document.getElementById('headerChargingMode');
     if (modeEl) modeEl.textContent = chargingMode || 'FAST';
   }

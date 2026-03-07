@@ -9,11 +9,23 @@
   function routeFromApi(route) {
     if (!route) return null;
     const geom = route.geometry;
+    let coordinates = geom?.coordinates;
+    if (!coordinates || coordinates.length < 2) {
+      const legs = route.legs;
+      if (legs && legs.length) {
+        coordinates = [];
+        legs.forEach((leg) => {
+          const g = leg.geometry?.coordinates;
+          if (g && g.length) coordinates.push(...g);
+        });
+      }
+    }
+    if (!coordinates || coordinates.length < 2) return null;
     const distanceKm = (route.distance || 0) / 1000;
     const durationMin = (route.duration || 0) / 60;
     return {
-      geometry: geom,
-      coordinates: geom?.coordinates || [],
+      geometry: geom && geom.coordinates ? geom : { type: 'LineString', coordinates: coordinates },
+      coordinates: coordinates,
       distanceKm,
       durationMin,
       distanceMi: distanceKm / (C?.routing?.miToKm || 1.60934),
@@ -57,14 +69,16 @@
   }
 
   function routeLineColor() {
-    return '#5dd4ff';
+    return '#00e5ff';
   }
+
+  const ROUTE_LAYER_ID = 'ev-trip-route';
 
   function drawRoute(mapModule, route) {
     if (!route || !route.geometry) return;
     const geoJSON = routeToGeoJSON(route.geometry);
     const lineColor = routeLineColor();
-    if (geoJSON) mapModule.addSourceAndLayer('route', geoJSON, lineColor, 5);
+    if (geoJSON) mapModule.addSourceAndLayer(ROUTE_LAYER_ID, geoJSON, lineColor, 5);
   }
 
   function drawRoutePreview(mapModule, route) {

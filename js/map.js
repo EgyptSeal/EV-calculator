@@ -13,18 +13,21 @@
   let navCarTweenId = null;
   let navCarTarget = null;
   let navigationMode = false;
-  var NAV_CAR_TWEEN_MS = 280;
   let previewBlinkInterval = null;
 
   var FALLBACK_STYLE_DAY = 'mapbox://styles/mapbox/light-v11';
   var FALLBACK_STYLE_NIGHT = 'mapbox://styles/mapbox/dark-v11';
   var FOLLOW_ZOOM = 18.5;
-  var FOLLOW_PITCH = 50;
-  var FOLLOW_PITCH_MOVING = 68;
-  var FOLLOW_PITCH_STOPPED = 48;
-  var FOLLOW_DURATION_MS = 450;
-  var FOLLOW_OFFSET_Y = 70;
-  var FOLLOW_CENTER_AHEAD_KM = 0.04;
+  var FOLLOW_ZOOM_APPROACH_TURN = 20;
+  var FOLLOW_ZOOM_APPROACH_DISTANCE_M = 350;
+  var FOLLOW_PITCH = 62;
+  var FOLLOW_PITCH_MIN_KMH = 5;
+  var FOLLOW_PITCH_MAX_KMH = 120;
+  var FOLLOW_PITCH_STOPPED = 58;
+  var FOLLOW_PITCH_MAX = 80;
+  var FOLLOW_DURATION_MS = 120;
+  var FOLLOW_CAR_BOTTOM_MARGIN_PX = 140;
+  var FOLLOW_CENTER_AHEAD_KM = 0;
 
   function styleUrl(which) {
     if (which === 'night') return (C.nightStyle || FALLBACK_STYLE_NIGHT);
@@ -115,6 +118,13 @@
             map.on('zoom', function () { updateMarkerScales(); });
             map.on('zoomend', function () { updateMarkerScales(); });
           }
+          if (!map._evUserPannedHandler) {
+            map._evUserPannedHandler = true;
+            map.on('moveend', function () {
+              if (_ignoreNextMoveEnd) _ignoreNextMoveEnd = false;
+              else userHasPannedMap = true;
+            });
+          }
           onLoaded();
         });
 
@@ -187,24 +197,63 @@
     map.fitBounds(padded, { duration: 800, padding: 40, maxZoom: 14 });
   }
 
-  var ROUTE_LINE_COLOR_DARK = '#00e5ff';
-  var ROUTE_LINE_COLOR_LIGHT = '#42a5f5';
+  var ROUTE_LINE_COLOR_DARK = '#6ec8f7';
+  var ROUTE_LINE_COLOR_LIGHT = '#5eb8ff';
+  var ROUTE_LINE_WIDTH = 8;
+  var ROUTE_GLOW_WIDTH = 18;
+  var routeGlowAnimationId = null;
 
   function getRouteLineColor() {
     var isDark = document.documentElement.classList.contains('theme-dark');
     return isDark ? ROUTE_LINE_COLOR_DARK : ROUTE_LINE_COLOR_LIGHT;
   }
 
+  function startRouteGlowAnimation() {
+    if (!map || !map.getLayer('ev-trip-route-glow')) return;
+    function tick(t) {
+      routeGlowAnimationId = requestAnimationFrame(tick);
+      if (!map || !map.getLayer('ev-trip-route-glow')) return;
+      var opacity = 0.28 + 0.14 * Math.sin(t * 0.002);
+      map.setPaintProperty('ev-trip-route-glow', 'line-opacity', opacity);
+    }
+    if (routeGlowAnimationId != null) cancelAnimationFrame(routeGlowAnimationId);
+    routeGlowAnimationId = requestAnimationFrame(tick);
+  }
+
+  function stopRouteGlowAnimation() {
+    if (routeGlowAnimationId != null) {
+      cancelAnimationFrame(routeGlowAnimationId);
+      routeGlowAnimationId = null;
+    }
+  }
+
   function addSourceAndLayer(id, geoJSON, lineColor, lineWidth) {
     if (!map) return;
-    var width = lineWidth != null ? lineWidth : 4;
+    var width = (id === 'ev-trip-route') ? ROUTE_LINE_WIDTH : (lineWidth != null ? lineWidth : 4);
     var lineColorUse = id === 'ev-trip-route' ? getRouteLineColor() : ROUTE_LINE_COLOR_DARK;
     if (map.getSource(id)) {
       map.getSource(id).setData(geoJSON);
       if (map.getLayer(id + '-line')) map.setPaintProperty(id + '-line', 'line-color', lineColorUse);
+      if (id === 'ev-trip-route' && map.getLayer('ev-trip-route-glow')) {
+        map.setPaintProperty('ev-trip-route-glow', 'line-color', lineColorUse);
+      }
       return;
     }
     map.addSource(id, { type: 'geojson', data: geoJSON });
+    if (id === 'ev-trip-route') {
+      map.addLayer({
+        id: 'ev-trip-route-glow',
+        type: 'line',
+        source: id,
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': lineColorUse,
+          'line-width': ROUTE_GLOW_WIDTH,
+          'line-opacity': 0.32,
+        },
+      });
+      startRouteGlowAnimation();
+    }
     map.addLayer({
       id: id + '-line',
       type: 'line',
@@ -216,6 +265,8 @@
 
   function removeRouteLayer(id) {
     if (!map) return;
+    if (id === 'ev-trip-route') stopRouteGlowAnimation();
+    if (id === 'ev-trip-route' && map.getLayer('ev-trip-route-glow')) map.removeLayer('ev-trip-route-glow');
     if (map.getLayer(id + '-line')) map.removeLayer(id + '-line');
     if (map.getSource(id)) map.removeSource(id);
   }
@@ -372,10 +423,12 @@
   function enterNavigationMode() {
     if (!map) return;
     navigationMode = true;
+    resetUserPannedMap();
     if (markers.start && markers.start.getElement) {
       var el = markers.start.getElement();
       if (el) el.style.display = 'none';
     }
+    _ignoreNextMoveEnd = true;
     map.easeTo({
       pitch: FOLLOW_PITCH,
       zoom: FOLLOW_ZOOM,
@@ -407,13 +460,22 @@
     return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
   }
 
+  /**
+   * Segment index = segment that actually contains the position (project point onto route).
+   * So guidance matches reality: we show the instruction for the step we're currently on.
+   */
   function getSegmentIndexFromRoute(coords, lng, lat) {
     if (!coords || coords.length < 2) return 0;
     var bestSeg = 0;
     var bestD = Infinity;
     for (var i = 0; i < coords.length - 1; i++) {
-      var c0 = coords[i], c1 = coords[i + 1];
-      var d = Math.pow(c0[0] - lng, 2) + Math.pow(c0[1] - lat, 2);
+      var a = coords[i], b = coords[i + 1];
+      var ax = a[0], ay = a[1], bx = b[0], by = b[1];
+      var dx = bx - ax, dy = by - ay;
+      var lenSq = dx * dx + dy * dy;
+      var t = lenSq <= 0 ? 0 : Math.max(0, Math.min(1, ((lng - ax) * dx + (lat - ay) * dy) / lenSq));
+      var px = ax + t * dx, py = ay + t * dy;
+      var d = (lng - px) * (lng - px) + (lat - py) * (lat - py);
       if (d < bestD) { bestD = d; bestSeg = i; }
     }
     return bestSeg;
@@ -441,6 +503,101 @@
     return 0;
   }
 
+  /**
+   * Route guidance from geometry only: turn, exit, keep straight.
+   * Roundabout wording is never used here – only when the API returns roundabout/rotary.
+   */
+  var SLIGHT_DEG = 35;
+  var SHARP_DEG = 90;
+  var U_TURN_DEG = 150;
+
+  function segmentLengthKm(a, b) {
+    if (!a || !b) return 0;
+    var latRad = (a[1] + b[1]) / 2 * Math.PI / 180;
+    var dlatKm = (b[1] - a[1]) * 111;
+    var dlngKm = (b[0] - a[0]) * 111 * Math.cos(latRad);
+    return Math.sqrt(dlatKm * dlatKm + dlngKm * dlngKm);
+  }
+
+  /**
+   * Mapbox Maneuver API style: get banner instruction for current step (primary, secondary, sub, step distance).
+   * Returns null if route has no maneuvers; then use getNextTurnInstruction(coords, segIndex).
+   * distanceTraveledM: optional meters traveled along route (for accurate remaining distance).
+   */
+  function getBannerInstruction(route, segIndex, distanceTraveledM) {
+    if (!route || !route.maneuvers || !route.stepIndexForSegment || !route.cumulativeStepDistanceM || !route.segmentDistanceKm) return null;
+    if (segIndex < 0 || segIndex >= route.stepIndexForSegment.length) return null;
+    var stepIdx = route.stepIndexForSegment[segIndex];
+    var maneuver = route.maneuvers[stepIdx];
+    if (!maneuver) return null;
+    var stepEndM = route.cumulativeStepDistanceM[stepIdx + 1];
+    var traveled = distanceTraveledM != null && !isNaN(distanceTraveledM) ? distanceTraveledM : (route.segmentDistanceKm[segIndex] * 1000);
+    var distanceRemainingM = Math.max(0, Math.round(stepEndM - traveled));
+    return {
+      primaryText: maneuver.primaryText,
+      type: maneuver.type,
+      modifier: maneuver.modifier,
+      secondaryText: maneuver.secondaryText,
+      subText: maneuver.subText,
+      distanceM: maneuver.distanceM,
+      distanceRemainingM: distanceRemainingM,
+      stepIndex: stepIdx,
+    };
+  }
+
+  /**
+   * Upcoming maneuvers list (after current step), per Mapbox Maneuver UI.
+   */
+  function getUpcomingManeuvers(route, segIndex, count) {
+    if (!route || !route.maneuvers || !route.stepIndexForSegment) return [];
+    if (segIndex < 0 || segIndex >= route.stepIndexForSegment.length) return [];
+    var stepIdx = route.stepIndexForSegment[segIndex];
+    var list = [];
+    for (var i = stepIdx + 1; i < route.maneuvers.length && list.length < (count || 5); i++) {
+      list.push(route.maneuvers[i]);
+    }
+    return list;
+  }
+
+  /** Google-style: next real turn (not continue straight) and distance to it, so we can show it early. */
+  function getUpcomingTurnBanner(route, segIndex, distanceTraveledM) {
+    if (!route || !route.maneuvers || !route.stepIndexForSegment || !route.cumulativeStepDistanceM) return null;
+    if (segIndex < 0 || segIndex >= route.stepIndexForSegment.length) return null;
+    var stepIdx = route.stepIndexForSegment[segIndex];
+    var traveled = distanceTraveledM != null && !isNaN(distanceTraveledM) ? distanceTraveledM : (route.segmentDistanceKm[segIndex] * 1000);
+    for (var i = stepIdx + 1; i < route.maneuvers.length; i++) {
+      var m = route.maneuvers[i];
+      var t = (m.type || '').toLowerCase().replace(/_/g, ' ');
+      var mod = (m.modifier || '').toLowerCase().replace(/_/g, ' ');
+      if (t === 'arrive') break;
+      var isStraight = (t === 'depart' || t === 'continue') && (mod === 'straight' || !mod);
+      if (isStraight) continue;
+      var stepEndM = route.cumulativeStepDistanceM[i + 1];
+      var distToTurnM = Math.max(0, Math.round(stepEndM - traveled));
+      if (distToTurnM > 2000) return null;
+      return { primaryText: m.primaryText, type: m.type, modifier: m.modifier, secondaryText: m.secondaryText, subText: m.subText, distanceRemainingM: distToTurnM, stepIndex: i };
+    }
+    return null;
+  }
+
+  function getNextTurnInstruction(coords, segIndex) {
+    if (!coords || coords.length < 2) return 'Keep straight';
+    if (segIndex < 0 || segIndex + 2 >= coords.length) return 'Arrive at destination';
+    var a = coords[segIndex], b = coords[segIndex + 1], c = coords[segIndex + 2];
+    var bear1 = bearingBetween(a[0], a[1], b[0], b[1]);
+    var bear2 = bearingBetween(b[0], b[1], c[0], c[1]);
+    var delta = ((bear2 - bear1 + 540) % 360) - 180;
+
+    if (delta >= U_TURN_DEG || delta <= -U_TURN_DEG) return 'Make a U-turn';
+    if (delta > SHARP_DEG) return 'Turn right';
+    if (delta < -SHARP_DEG) return 'Turn left';
+    if (delta > SLIGHT_DEG) return 'Take the right exit';
+    if (delta < -SLIGHT_DEG) return 'Take the left exit';
+    if (delta > CAR_TURN_THRESHOLD_DEG) return 'Take the right exit';
+    if (delta < -CAR_TURN_THRESHOLD_DEG) return 'Take the left exit';
+    return 'Keep straight';
+  }
+
   function setCarMarkerRotation(marker, turnOffsetDeg) {
     if (!marker || !marker.getElement) return;
     lastCarTurnOffset = turnOffsetDeg != null ? turnOffsetDeg : 0;
@@ -449,42 +606,57 @@
     el.style.transform = 'rotate(' + lastCarTurnOffset + 'deg)';
   }
 
-  /** Follow car: camera behind car (center point ahead of car), car above bottom line, strong tilt. */
-  function followCar(lng, lat, bearing, forceFollow, speedKmh) {
+  var userHasPannedMap = false;
+  var _ignoreNextMoveEnd = false;
+
+  /** Follow car: car locked at bottom center, pitch increases with speed. Zooms in when approaching a turn/exit. */
+  function followCar(lng, lat, bearing, forceFollow, speedKmh, options) {
     if (!map || (!navigationMode && !forceFollow)) return;
-    var pitch = (speedKmh != null && speedKmh > 20) ? FOLLOW_PITCH_MOVING : FOLLOW_PITCH_STOPPED;
-    var centerLng = lng;
-    var centerLat = lat;
-    if (bearing != null && !isNaN(bearing) && FOLLOW_CENTER_AHEAD_KM > 0) {
-      var rad = (bearing * Math.PI) / 180;
-      var latRad = (lat * Math.PI) / 180;
-      centerLng = lng + (FOLLOW_CENTER_AHEAD_KM / 111.32) * Math.sin(rad) / Math.cos(latRad);
-      centerLat = lat + (FOLLOW_CENTER_AHEAD_KM / 110.54) * Math.cos(rad);
-    }
+    if (userHasPannedMap) return;
+    var speed = speedKmh != null && !isNaN(speedKmh) ? Math.max(0, Math.min(FOLLOW_PITCH_MAX_KMH, speedKmh)) : 0;
+    var pitch = speed <= FOLLOW_PITCH_MIN_KMH
+      ? FOLLOW_PITCH_STOPPED
+      : FOLLOW_PITCH_STOPPED + ((speed - FOLLOW_PITCH_MIN_KMH) / (FOLLOW_PITCH_MAX_KMH - FOLLOW_PITCH_MIN_KMH)) * (FOLLOW_PITCH_MAX - FOLLOW_PITCH_STOPPED);
+    var distToTurnM = options && options.distToTurnM != null ? options.distToTurnM : Infinity;
+    var isTurnOrExit = options && options.isTurnOrExit === true;
+    var zoom = (isTurnOrExit && distToTurnM < FOLLOW_ZOOM_APPROACH_DISTANCE_M)
+      ? FOLLOW_ZOOM_APPROACH_TURN
+      : FOLLOW_ZOOM;
+    var container = map.getContainer();
+    var h = (container && container.clientHeight) || 400;
+    var offsetY = Math.round(h / 2 - FOLLOW_CAR_BOTTOM_MARGIN_PX);
     var opts = {
-      center: [centerLng, centerLat],
-      zoom: FOLLOW_ZOOM,
+      center: [lng, lat],
+      zoom: zoom,
       pitch: pitch,
       duration: FOLLOW_DURATION_MS,
       essential: true,
-      offset: [0, FOLLOW_OFFSET_Y],
+      offset: [0, offsetY],
       easing: function (t) { return t * (2 - t); },
     };
     if (bearing != null && !isNaN(bearing)) opts.bearing = bearing;
+    _ignoreNextMoveEnd = true;
     map.easeTo(opts);
+  }
+
+  function resetUserPannedMap() {
+    userHasPannedMap = false;
   }
 
   function flyToCar(lng, lat, opts) {
     if (!map) return;
     opts = opts || {};
     var duration = opts.duration != null ? opts.duration : 800;
+    var container = map.getContainer();
+    var h = (container && container.clientHeight) || 400;
+    var offsetY = Math.round(h / 2 - FOLLOW_CAR_BOTTOM_MARGIN_PX);
     var flyOpts = {
       center: [lng, lat],
       zoom: opts.zoom != null ? opts.zoom : FOLLOW_ZOOM,
       pitch: opts.pitch != null ? opts.pitch : FOLLOW_PITCH,
       duration: duration,
       essential: true,
-      offset: [0, FOLLOW_OFFSET_Y],
+      offset: [0, offsetY],
       easing: function (t) { return t * (2 - t); },
     };
     if (opts.bearing != null && !isNaN(opts.bearing)) flyOpts.bearing = opts.bearing;
@@ -495,7 +667,6 @@
     var wrap = document.createElement('div');
     wrap.className = className;
     wrap.style.transformOrigin = 'center center';
-    wrap.style.transition = 'transform 0.25s ease-out';
     var ripples = document.createElement('div');
     ripples.className = 'car-marker-ripples';
     for (var i = 0; i < 3; i++) {
@@ -515,6 +686,9 @@
     if (!map) return;
     var mapboxgl = global.mapboxgl || (typeof window !== 'undefined' && window.mapboxgl);
     if (!mapboxgl) return;
+    if (typeof lng !== 'number' || typeof lat !== 'number' || isNaN(lng) || isNaN(lat)) return;
+    if (lng === 0 && lat === 0) return;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
     if (!markers.navCar) {
       const wrap = createCarMarkerElement('nav-car-marker');
       markers.navCar = new mapboxgl.Marker({ element: wrap, anchor: 'center' })
@@ -530,35 +704,34 @@
       cancelAnimationFrame(navCarTweenId);
       navCarTweenId = null;
     }
-    if (lastNavCarLng == null || lastNavCarLat == null) {
-      var cur = markers.navCar.getLngLat();
-      lastNavCarLng = cur.lng;
-      lastNavCarLat = cur.lat;
-    }
-    var startLng = lastNavCarLng;
-    var startLat = lastNavCarLat;
-    navCarTarget = { lng: lng, lat: lat, turnOffsetDeg: turnOffsetDeg };
-    var startTime = null;
-    function step(now) {
-      if (!startTime) startTime = now;
-      var elapsed = now - startTime;
-      var t = Math.min(1, elapsed / NAV_CAR_TWEEN_MS);
-      t = t * t * (3 - 2 * t);
-      var curLng = startLng + (lng - startLng) * t;
-      var curLat = startLat + (lat - startLat) * t;
-      markers.navCar.setLngLat([curLng, curLat]);
-      var turnT = turnOffsetDeg != null ? turnOffsetDeg : lastCarTurnOffset;
-      setCarMarkerRotation(markers.navCar, turnT);
-      if (t < 1) {
-        navCarTweenId = requestAnimationFrame(step);
-      } else {
-        navCarTweenId = null;
-        lastNavCarLng = lng;
-        lastNavCarLat = lat;
-      }
-    }
-    navCarTweenId = requestAnimationFrame(step);
+    lastNavCarLng = lng;
+    lastNavCarLat = lat;
+    markers.navCar.setLngLat([lng, lat]);
+    setCarMarkerRotation(markers.navCar, turnOffsetDeg != null ? turnOffsetDeg : lastCarTurnOffset);
     updateCarMarkerSizes();
+  }
+
+  var tempSavePinMarker = null;
+
+  function setTempSavePin(lng, lat) {
+    if (!map) return;
+    var mapboxgl = global.mapboxgl || (typeof window !== 'undefined' && window.mapboxgl);
+    if (!mapboxgl) return;
+    removeTempSavePin();
+    var el = document.createElement('div');
+    el.className = 'pin-save-blink';
+    el.style.fontSize = '28px';
+    el.style.lineHeight = '1';
+    el.textContent = '📍';
+    el.style.filter = 'drop-shadow(0 0 6px #ff4757)';
+    tempSavePinMarker = new mapboxgl.Marker({ element: el, anchor: 'bottom' }).setLngLat([lng, lat]).addTo(map);
+  }
+
+  function removeTempSavePin() {
+    if (tempSavePinMarker) {
+      tempSavePinMarker.remove();
+      tempSavePinMarker = null;
+    }
   }
 
   function clearNavigationCar() {
@@ -638,7 +811,14 @@
     getBearingFromRoute,
     getSegmentIndexFromRoute,
     getTurnOffsetFromRoute,
+    getNextTurnInstruction,
+    getBannerInstruction,
+    getUpcomingManeuvers,
+    getUpcomingTurnBanner,
     setNavigationCarPosition,
     clearNavigationCar,
+    resetUserPannedMap,
+    setTempSavePin,
+    removeTempSavePin,
   };
 })(window);

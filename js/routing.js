@@ -23,13 +23,66 @@
     if (!coordinates || coordinates.length < 2) return null;
     const distanceKm = (route.distance || 0) / 1000;
     const durationMin = (route.duration || 0) / 60;
-    return {
+    const out = {
       geometry: geom && geom.coordinates ? geom : { type: 'LineString', coordinates: coordinates },
       coordinates: coordinates,
       distanceKm,
       durationMin,
       distanceMi: distanceKm / (C?.routing?.miToKm || 1.60934),
     };
+    const legs = route.legs;
+    if (legs && legs.length && legs[0].steps && legs[0].steps.length) {
+      const steps = legs[0].steps;
+      const cumulativeStepDistanceM = [0];
+      const maneuvers = [];
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
+        const d = step.distance != null ? step.distance : 0;
+        cumulativeStepDistanceM.push(cumulativeStepDistanceM[cumulativeStepDistanceM.length - 1] + d);
+        const banner = step.banner_instructions && step.banner_instructions[0];
+        const primary = banner && banner.primary ? banner.primary : null;
+        const secondary = banner && banner.secondary ? banner.secondary : null;
+        const sub = banner && banner.sub ? banner.sub : null;
+        const text = primary && primary.text != null ? primary.text : (step.maneuver && step.maneuver.instruction ? step.maneuver.instruction : '');
+        const type = (primary && primary.type) || (step.maneuver && step.maneuver.type) || 'turn';
+        const modifier = (primary && primary.modifier) || (step.maneuver && step.maneuver.modifier) || 'straight';
+        maneuvers.push({
+          primaryText: text,
+          type: type,
+          modifier: modifier,
+          secondaryText: secondary && secondary.text != null ? secondary.text : null,
+          subText: sub && sub.text != null ? sub.text : null,
+          distanceM: d,
+        });
+      }
+      out.maneuvers = maneuvers;
+      out.cumulativeStepDistanceM = cumulativeStepDistanceM;
+      const segDistKm = [0];
+      for (let i = 1; i < coordinates.length; i++) {
+        const a = coordinates[i - 1];
+        const b = coordinates[i];
+        const latRad = ((a[1] + b[1]) / 2) * Math.PI / 180;
+        const dlat = (b[1] - a[1]) * 111;
+        const dlng = (b[0] - a[0]) * 111 * Math.cos(latRad);
+        segDistKm.push(segDistKm[segDistKm.length - 1] + Math.sqrt(dlat * dlat + dlng * dlng));
+      }
+      const stepIndexForSegment = [];
+      for (let seg = 0; seg < coordinates.length - 1; seg++) {
+        const distM = segDistKm[seg] * 1000;
+        let stepIdx = 0;
+        for (let s = 0; s < cumulativeStepDistanceM.length - 1; s++) {
+          if (distM >= cumulativeStepDistanceM[s] && distM < cumulativeStepDistanceM[s + 1]) {
+            stepIdx = s;
+            break;
+          }
+          if (s === cumulativeStepDistanceM.length - 2) stepIdx = s;
+        }
+        stepIndexForSegment.push(stepIdx);
+      }
+      out.stepIndexForSegment = stepIndexForSegment;
+      out.segmentDistanceKm = segDistKm;
+    }
+    return out;
   }
 
   async function getRoute(coordinates) {
@@ -47,6 +100,8 @@
       geometries: 'geojson',
       overview: 'full',
       alternatives: String(!!alternatives),
+      steps: 'true',
+      banner_instructions: 'true',
     });
     const url = `${base}/${coords}?${params}`;
     const res = await fetch(url);

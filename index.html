@@ -36,8 +36,8 @@
               <span class="ac-toggle-track">
                 <span class="ac-toggle-thumb"></span>
               </span>
-              <span class="ac-toggle-label ac-label-off">AC ON</span>
-              <span class="ac-toggle-label ac-label-on">AC OFF</span>
+              <span class="ac-toggle-label ac-label-off">AC OFF</span>
+              <span class="ac-toggle-label ac-label-on">AC ON</span>
             </div>
           </div>
           <div class="modal-field">
@@ -140,7 +140,8 @@
         <button type="button" class="theme-color-swatch" data-theme-color="yellow" aria-label="Yellow theme" title="Yellow"></button>
       </div>
       <button type="button" class="btn-theme" id="themeToggle" title="Toggle dark/light theme">Map: Dark</button>
-      <button type="button" class="btn-theme" id="tripSetupBtn" title="Vehicle & trip settings">Trip setup</button>
+      <button type="button" class="btn-theme trip-setup-3d-blue" id="tripSetupBtn" title="Vehicle & trip settings">Trip setup</button>
+      <button type="button" class="btn-theme" id="savedPlacesBtn" title="Saved places">Saved Places</button>
       <button type="button" class="header-btn header-btn-cancel" id="btnCancelTrip" title="Cancel current trip">Cancel Trip</button>
       <button type="button" class="header-btn header-btn-restart" id="btnRestart" title="Restart trip">Restart</button>
       <button type="button" class="header-btn header-btn-refresh" id="btnRefresh" title="Refresh">Refresh</button>
@@ -160,6 +161,11 @@
       <div class="left-sidebar panel">
         <div class="route-options-panel">
           <section class="route-planning-section route-inputs">
+            <div class="saved-places-panel" id="savedPlacesPanel" style="display:none;">
+              <div class="panel-title">SAVED PLACES</div>
+              <p class="saved-places-hint">Pin a location on the map, then click Save and name it.</p>
+              <div id="savedPlacesSlots" class="saved-places-slots"></div>
+            </div>
             <div class="panel-title">ROUTE PLANNING</div>
             <div class="field-row address-bar-row">
               <label>Start location</label>
@@ -177,7 +183,9 @@
                 <input type="text" id="destination" placeholder="e.g. city, street, or pin on map" autocomplete="off" dir="auto">
                 <button type="button" class="pin-btn dest-pin" id="pinDest" title="Pin on map">📍</button>
                 <button type="button" class="btn-icon use-current" id="useCurrentDest" title="Use current location">⌖</button>
+                <button type="button" class="btn-icon btn-saved-dest" id="savedDestBtn" title="Choose saved place">📌</button>
               </div>
+              <div id="savedDestDropdown" class="search-dropdown saved-dest-dropdown" style="display:none;"></div>
               <p class="address-bar-hint" id="destLocationHint">Type 2+ characters for place suggestions</p>
               <div id="destDropdown" class="search-dropdown"></div>
             </div>
@@ -352,6 +360,18 @@
     </div>
   </div>
 
+  <!-- Edit name for saved place (3D box) -->
+  <div class="modal-overlay edit-name-modal-overlay" id="editNameModalOverlay" style="display:none;" aria-hidden="true">
+    <div class="edit-name-modal-box">
+      <div class="edit-name-modal-title">Edit name</div>
+      <input type="text" id="editNameInput" placeholder="Place name" maxlength="80" class="edit-name-input">
+      <div class="edit-name-actions">
+        <button type="button" class="btn btn-secondary" id="editNameCancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="editNameSave">Save</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://api.mapbox.com/mapbox-gl-js/v3.19.0/mapbox-gl.js"></script>
   <script>
     if (window.mapboxgl && window.mapboxgl.setRTLTextPlugin) {
@@ -506,6 +526,19 @@
       var tripSetupBtn = document.getElementById('tripSetupBtn');
       if (tripSetupBtn) tripSetupBtn.addEventListener('click', showModal);
       syncModalTheme();
+    })();
+    (function bindSavedPlacesButton() {
+      var btn = document.getElementById('savedPlacesBtn');
+      var panel = document.getElementById('savedPlacesPanel');
+      if (!btn || !panel) return;
+      btn.addEventListener('click', function () {
+        if (typeof window.__evToggleSavedPlacesPanel === 'function') {
+          window.__evToggleSavedPlacesPanel();
+        } else {
+          var show = panel.style.display === 'none' || !panel.style.display;
+          panel.style.display = show ? 'block' : 'none';
+        }
+      });
     })();
   </script>
 </body>

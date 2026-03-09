@@ -219,6 +219,328 @@
     slowEl.classList.toggle('visible', overLimit);
   }
 
+  /** Show distance until this close (m); below this show instruction only for immediate action (Google-style: still show "in 25 m" until then). */
+  var HINT_IMMEDIATE_DISTANCE_M = 25;
+  /** Show upcoming turn this far ahead (m), Google-style early guidance. */
+  var HINT_SHOW_UPCOMING_TURN_AHEAD_M = 2000;
+
+  /** Attached 44-icon sheet: 4 rows x 11 cols (row 0 = straight, 1 = right turns, 2 = left turns, 3 = U-turn/roundabout/splits). */
+  var ATTACHED_NAV_ROWS = 4;
+  var ATTACHED_NAV_COLS = 11;
+  var ATTACHED_NAV_CELL = 48;
+  var ATTACHED_NAV_ICONS = {
+    'keep-straight': [0, 0],
+    'turn-right': [1, 0],
+    'turn-left': [2, 0],
+    'take-right-exit': [1, 1],
+    'take-left-exit': [2, 1],
+    'sharp-right': [1, 2],
+    'sharp-left': [2, 2],
+    uturn: [3, 0],
+    'roundabout-1st': [3, 1],
+    'roundabout-2nd': [3, 2],
+    'roundabout-3rd': [3, 3],
+    'roundabout-4th': [3, 4],
+    arrive: [0, 10],
+  };
+
+  /**
+   * Fallback sprite grid (nav-icons-sprite.png). 64px cells.
+   */
+  var NAV_SPRITE_CELL = 64;
+  var NAV_SPRITE_ICONS = {
+    'keep-straight': [4, 14],
+    'take-left-exit': [5, 14],
+    'take-right-exit': [3, 14],
+    'turn-left': [6, 14],
+    'turn-right': [2, 14],
+    'sharp-left': [7, 14],
+    'sharp-right': [1, 14],
+    uturn: [0, 16],
+    'roundabout-1st': [2, 11],
+    'roundabout-2nd': [4, 11],
+    'roundabout-3rd': [6, 11],
+    'roundabout-4th': [7, 11],
+    arrive: [8, 0],
+  };
+
+  /** Professional nav icons: simple arrows like Google Maps (no decorative or funny shapes). */
+  var NAV_HINT_ICONS_SVG = {
+    'keep-straight': '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path fill="currentColor" d="M12 2l-5 7h3v8h4V9h3L12 2z"/></svg>',
+    'turn-left': '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path fill="currentColor" d="M18 8v3H9v3l-3-3 3-3h9V8h3l-3-4-3 4z"/></svg>',
+    'turn-right': '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path fill="currentColor" d="M6 8V5h9v3l3-3 3 4-3 4v-3H9V8H6z"/></svg>',
+    'take-left-exit': '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path fill="currentColor" d="M16 8v2h-4v4l-2-2 2-2v-2h4V8l3 3-3 3V8z"/></svg>',
+    'take-right-exit': '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path fill="currentColor" d="M8 8v2h4v4l2-2-2-2v-2H8V8l-3 3 3 3V8z"/></svg>',
+    'sharp-left': '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path fill="currentColor" d="M18 8v3H9v3l-3-3 3-3h9V8h3l-3-4-3 4z"/></svg>',
+    'sharp-right': '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path fill="currentColor" d="M6 8V5h9v3l3-3 3 4-3 4v-3H9V8H6z"/></svg>',
+    uturn: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path fill="currentColor" d="M12 4v5h4v2c0 2.2-1.8 4-4 4s-4-1.8-4-4V9c0-2.2 1.8-4 4-4h4V4l4 4-4 4z"/></svg>',
+    'roundabout-1st': '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path fill="currentColor" d="M15 11l-3-3v2H9v2h3v2l3-3z"/></svg>',
+    'roundabout-2nd': '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path fill="currentColor" d="M11 9l3 3-3 3v-2H9v-2h2V9z"/></svg>',
+    'roundabout-3rd': '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path fill="currentColor" d="M9 13l3 3v-2h2v-2h-2v-2L9 13z"/></svg>',
+    'roundabout-4th': '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path fill="currentColor" d="M13 15l-3 3v-2H8v-2h2v-2l3 3z"/></svg>',
+    arrive: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path fill="currentColor" d="M12 2C8.1 2 5 5.1 5 9c0 5.3 7 13 7 13s7-7.7 7-13c0-3.9-3.1-7-7-7zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>',
+  };
+
+  /** Replace north/south/east/west with straight so guidance uses only left, right, straight. */
+  function normalizeInstructionText(str) {
+    if (!str || typeof str !== 'string') return str;
+    var s = str
+      .replace(/\bHead\s+(north|south|east|west)\b/gi, 'Head straight')
+      .replace(/\bContinue\s+(north|south|east|west)\b/gi, 'Continue straight')
+      .replace(/\bGo\s+(north|south|east|west)\b/gi, 'Go straight')
+      .replace(/\bTurn\s+(north|south|east|west)\s+onto\b/gi, 'Turn onto')
+      .replace(/\bTurn\s+(north|south|east|west)\b/gi, 'Turn')
+      .replace(/\bHeading\s+(north|south|east|west)\b/gi, 'Heading straight')
+      .replace(/\bTravel\s+(north|south|east|west)\b/gi, 'Travel straight')
+      .replace(/\bDrive\s+(north|south|east|west)\b/gi, 'Drive straight')
+      .replace(/\bBear\s+(north|south|east|west)\b/gi, 'Bear straight')
+      .replace(/\bProceed\s+(north|south|east|west)\b/gi, 'Proceed straight')
+      .replace(/\s+(north|south|east|west)\s+on\s/gi, ' straight on ')
+      .replace(/\s+then\s+(north|south|east|west)\s/gi, ' then straight ')
+      .replace(/\s+and\s+(north|south|east|west)\s/gi, ' and straight ')
+      .replace(/\bnorthbound\b/gi, 'ahead')
+      .replace(/\bsouthbound\b/gi, 'ahead')
+      .replace(/\beastbound\b/gi, 'ahead')
+      .replace(/\bwestbound\b/gi, 'ahead')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    return s;
+  }
+
+  /**
+   * Mapbox turn icon mapping (per Maneuver UI / TurnIconResources).
+   * Maps (type, modifier) to our icon key: turn, continue, depart, fork, roundabout/rotary, on ramp, end of road, notification.
+   */
+  function bannerTypeModifierToIconKey(type, modifier) {
+    var t = (type || '').toLowerCase().replace(/_/g, ' ');
+    var m = (modifier || 'straight').toLowerCase().replace(/_/g, ' ');
+    if (t === 'arrive') return 'arrive';
+    if (m === 'uturn') return 'uturn';
+    if (t === 'depart') {
+      if (m === 'left') return 'turn-left';
+      if (m === 'right') return 'turn-right';
+      return 'keep-straight';
+    }
+    if (t === 'roundabout' || t === 'rotary' || t === 'roundabout turn') {
+      if (m === 'right') return 'roundabout-1st';
+      if (m === 'straight') return 'roundabout-2nd';
+      if (m === 'left') return 'roundabout-3rd';
+      return 'roundabout-4th';
+    }
+    if (t === 'merge' || t === 'on ramp' || t === 'off ramp' || t === 'fork' || t === 'continue' || t === 'turn' || t === 'end of road' || t === 'notification') {
+      if (m === 'sharp left') return 'sharp-left';
+      if (m === 'sharp right') return 'sharp-right';
+      if (m === 'left') return 'turn-left';
+      if (m === 'right') return 'turn-right';
+      if (m === 'slight left') return 'take-left-exit';
+      if (m === 'slight right') return 'take-right-exit';
+      if (m === 'straight') return 'keep-straight';
+      return 'keep-straight';
+    }
+    return 'keep-straight';
+  }
+
+  function instructionToIconKey(instruction) {
+    if (instruction === 'Arrive at destination') return 'arrive';
+    if (instruction === 'Make a U-turn') return 'uturn';
+    if (instruction === 'Take the left exit') return 'take-left-exit';
+    if (instruction === 'Take the right exit') return 'take-right-exit';
+    if (instruction === 'Keep straight') return 'keep-straight';
+    if (instruction === 'Turn left') return 'turn-left';
+    if (instruction === 'Turn right') return 'turn-right';
+    if (instruction === 'Sharp left') return 'sharp-left';
+    if (instruction === 'Sharp right') return 'sharp-right';
+    if (instruction && instruction.indexOf('Take the 1st exit') === 0) return 'roundabout-1st';
+    if (instruction && instruction.indexOf('Take the 2nd exit') === 0) return 'roundabout-2nd';
+    if (instruction && instruction.indexOf('Take the 3rd exit') === 0) return 'roundabout-3rd';
+    if (instruction && instruction.indexOf('Take the 4th exit') === 0) return 'roundabout-4th';
+    return 'keep-straight';
+  }
+
+  function isContinueStraightInstruction(instruction) {
+    return instruction === 'Keep straight';
+  }
+
+  /** True if this is a turn/exit (zoom in when approaching). */
+  function isTurnOrExitFromBanner(banner) {
+    if (!banner) return false;
+    var t = banner.type;
+    if (t === 'arrive' || t === 'depart') return t === 'arrive';
+    return true;
+  }
+
+  /** When API says left but route geometry says right (or vice versa), fix the banner so guidance matches the map. */
+  /** When API says roundabout but geometry is a simple turn (no roundabout visible), show the simple turn instead. */
+  function correctBannerFromGeometry(banner, geometryInstruction) {
+    if (!banner || !geometryInstruction) return banner;
+    var t = (banner.type || '').toLowerCase().replace(/_/g, ' ');
+    var primary = (banner.primaryText || '').toLowerCase();
+    var geom = geometryInstruction.toLowerCase();
+
+    if (t === 'roundabout' || t === 'rotary' || t === 'roundabout turn') {
+      var ontoMatch = (banner.primaryText || '').match(/\bonto\s+(.+)/i);
+      var ontoStr = ontoMatch ? ontoMatch[1].replace(/\s+in\s+\d.*$/i, '').trim() : '';
+      if (geom.indexOf('turn left') !== -1 || geom === 'turn left') {
+        return { primaryText: 'Turn left' + (ontoStr ? ' onto ' + ontoStr : ''), modifier: 'left', type: 'turn', secondaryText: banner.secondaryText, subText: banner.subText, distanceRemainingM: banner.distanceRemainingM, stepIndex: banner.stepIndex };
+      }
+      if (geom.indexOf('turn right') !== -1 || geom === 'turn right') {
+        return { primaryText: 'Turn right' + (ontoStr ? ' onto ' + ontoStr : ''), modifier: 'right', type: 'turn', secondaryText: banner.secondaryText, subText: banner.subText, distanceRemainingM: banner.distanceRemainingM, stepIndex: banner.stepIndex };
+      }
+      if (geom.indexOf('take the left exit') !== -1) {
+        return { primaryText: 'Take the left exit' + (ontoStr ? ' onto ' + ontoStr : ''), modifier: 'slight left', type: 'turn', secondaryText: banner.secondaryText, subText: banner.subText, distanceRemainingM: banner.distanceRemainingM, stepIndex: banner.stepIndex };
+      }
+      if (geom.indexOf('take the right exit') !== -1) {
+        return { primaryText: 'Take the right exit' + (ontoStr ? ' onto ' + ontoStr : ''), modifier: 'slight right', type: 'turn', secondaryText: banner.secondaryText, subText: banner.subText, distanceRemainingM: banner.distanceRemainingM, stepIndex: banner.stepIndex };
+      }
+      if (geom.indexOf('keep straight') !== -1) {
+        return { primaryText: 'Keep straight' + (ontoStr ? ' onto ' + ontoStr : ''), modifier: 'straight', type: 'continue', secondaryText: banner.secondaryText, subText: banner.subText, distanceRemainingM: banner.distanceRemainingM, stepIndex: banner.stepIndex };
+      }
+    }
+
+    var mod = (banner.modifier || '').toLowerCase().replace(/_/g, ' ');
+    var wantsLeft = mod === 'left' || primary.indexOf('turn left') !== -1 || primary.indexOf('left onto') !== -1 || primary.indexOf('left exit') !== -1;
+    var wantsRight = mod === 'right' || primary.indexOf('turn right') !== -1 || primary.indexOf('right onto') !== -1 || primary.indexOf('right exit') !== -1;
+    var geomLeft = geom.indexOf('left') !== -1;
+    var geomRight = geom.indexOf('right') !== -1;
+    if (wantsLeft && geomRight) {
+      return { primaryText: (banner.primaryText || '').replace(/\bleft\b/gi, 'right'), modifier: 'right', type: banner.type, secondaryText: banner.secondaryText, subText: banner.subText, distanceRemainingM: banner.distanceRemainingM, stepIndex: banner.stepIndex };
+    }
+    if (wantsRight && geomLeft) {
+      return { primaryText: (banner.primaryText || '').replace(/\bright\b/gi, 'left'), modifier: 'left', type: banner.type, secondaryText: banner.secondaryText, subText: banner.subText, distanceRemainingM: banner.distanceRemainingM, stepIndex: banner.stepIndex };
+    }
+    return banner;
+  }
+
+  var navAttachedLoaded = false;
+  var navAttachedTried = false;
+  var navSpriteLoaded = false;
+  var navSpriteTried = false;
+
+  function tryUseAttachedNavArrows(iconEl, key) {
+    if (!iconEl) return false;
+    if (!navAttachedTried) {
+      navAttachedTried = true;
+      var img = new Image();
+      img.onload = function () { navAttachedLoaded = true; refreshNavHintIfVisible(); };
+      img.onerror = function () { navAttachedLoaded = false; };
+      img.src = 'assets/nav-arrows.png';
+    }
+    if (!navAttachedLoaded) return false;
+    var pos = ATTACHED_NAV_ICONS[key];
+    if (!pos) return false;
+    var r = pos[0], c = pos[1];
+    iconEl.classList.add('nav-hint-icon-sprite');
+    iconEl.style.backgroundImage = 'url(assets/nav-arrows.png)';
+    iconEl.style.backgroundPosition = (-c * ATTACHED_NAV_CELL) + 'px ' + (-r * ATTACHED_NAV_CELL) + 'px';
+    iconEl.style.backgroundSize = (ATTACHED_NAV_COLS * ATTACHED_NAV_CELL) + 'px ' + (ATTACHED_NAV_ROWS * ATTACHED_NAV_CELL) + 'px';
+    return true;
+  }
+
+  function tryUseNavSprite(iconEl, key) {
+    if (!iconEl) return false;
+    if (tryUseAttachedNavArrows(iconEl, key)) return true;
+    if (!navSpriteTried) {
+      navSpriteTried = true;
+      var img = new Image();
+      img.onload = function () { navSpriteLoaded = true; refreshNavHintIfVisible(); };
+      img.onerror = function () { navSpriteLoaded = false; };
+      img.src = 'assets/nav-icons-sprite.png';
+    }
+    if (!navSpriteLoaded) return false;
+    var pos = NAV_SPRITE_ICONS[key];
+    if (!pos) return false;
+    var r = pos[0], c = pos[1];
+    iconEl.classList.add('nav-hint-icon-sprite');
+    iconEl.style.backgroundImage = 'url(assets/nav-icons-sprite.png)';
+    iconEl.style.backgroundPosition = (-c * NAV_SPRITE_CELL) + 'px ' + (-r * NAV_SPRITE_CELL) + 'px';
+    iconEl.style.backgroundSize = 'auto';
+    return true;
+  }
+
+  function refreshNavHintIfVisible() {
+    var h = document.getElementById('navRouteHint');
+    if (h && h.style.display !== 'none' && state && (state._lastNavBanner || state._lastNavInstruction != null))
+      updateNavRouteHintContent(state._lastNavBanner || state._lastNavInstruction, state._lastNavDistM);
+  }
+
+  /**
+   * Update nav hint from Mapbox banner (primary, optional secondary/sub, step distance) or from fallback instruction.
+   * instructionOrBanner: string (instruction) or object { primaryText, type, modifier, secondaryText, subText, distanceRemainingM }.
+   */
+  function updateNavRouteHintContent(instructionOrBanner, distM) {
+    var iconEl = document.getElementById('navRouteHintIcon');
+    var textEl = document.getElementById('navRouteHintText');
+    var hintEl = document.getElementById('navRouteHint');
+    if (!hintEl || !textEl) return;
+    var isBanner = instructionOrBanner && typeof instructionOrBanner === 'object' && instructionOrBanner.primaryText != null;
+    var key;
+    var text;
+    if (isBanner) {
+      var banner = instructionOrBanner;
+      key = bannerTypeModifierToIconKey(banner.type, banner.modifier);
+      var primary = normalizeInstructionText(banner.primaryText || '');
+      var t = (banner.type || '').toLowerCase().replace(/_/g, ' ');
+      var isRoundaboutStep = (t === 'roundabout' || t === 'rotary' || t === 'roundabout turn');
+      if (isRoundaboutStep && primary && primary.toLowerCase().indexOf('roundabout') === -1 && primary.toLowerCase().indexOf('rotary') === -1)
+        primary = 'At the roundabout, ' + (primary.charAt(0).toLowerCase() + primary.slice(1)).trim();
+      var rem = banner.distanceRemainingM != null ? banner.distanceRemainingM : distM;
+      if (banner.type === 'arrive') {
+        text = primary;
+      } else if (rem != null && rem > HINT_IMMEDIATE_DISTANCE_M) {
+        var displayM = rem > 1000 ? Math.round(rem / 200) * 200 : rem > 400 ? Math.round(rem / 100) * 100 : rem > 100 ? Math.round(rem / 50) * 50 : Math.round(rem / 25) * 25 || 50;
+        if (displayM >= 1000) text = primary + ' in ' + (displayM / 1000).toFixed(1) + ' km';
+        else if (displayM >= 500) text = primary + ' in ' + Math.round(displayM / 100) * 100 + ' m';
+        else text = primary + ' in ' + displayM + ' m';
+        if (banner.secondaryText) text += ' · ' + normalizeInstructionText(banner.secondaryText);
+        if (banner.subText) text += ' · Then ' + normalizeInstructionText(banner.subText).toLowerCase();
+      } else {
+        text = primary;
+        if (banner.secondaryText) text += ' · ' + normalizeInstructionText(banner.secondaryText);
+        if (banner.subText) text += ' · Then ' + normalizeInstructionText(banner.subText).toLowerCase();
+      }
+    } else {
+      var instructionRaw = instructionOrBanner;
+      key = instructionToIconKey(instructionRaw);
+      text = normalizeInstructionText(instructionRaw);
+      if (instructionRaw !== 'Arrive at destination' && distM != null) {
+        var displayM = distM;
+        if (distM > 1000) displayM = Math.round(distM / 200) * 200;
+        else if (distM > 400) displayM = Math.round(distM / 100) * 100;
+        else if (distM > 100) displayM = Math.round(distM / 50) * 50;
+        else if (distM > 25) displayM = Math.round(distM / 25) * 25 || 50;
+        if (distM <= HINT_IMMEDIATE_DISTANCE_M) {
+          text = text;
+        } else if (isContinueStraightInstruction(instructionRaw)) {
+          text = 'Keep straight for ' + (displayM >= 1000 ? (displayM / 1000).toFixed(1) + ' km' : displayM + ' m');
+        } else {
+          text = 'In ' + displayM + ' m, ' + text.toLowerCase();
+        }
+      }
+    }
+    if (iconEl) {
+      var iconKey = key && (NAV_HINT_ICONS_SVG[key] || NAV_SPRITE_ICONS[key]) ? key : 'keep-straight';
+      var svgHtml = NAV_HINT_ICONS_SVG[iconKey] || NAV_HINT_ICONS_SVG['keep-straight'];
+      iconEl.classList.remove('nav-hint-icon-sprite');
+      iconEl.style.backgroundImage = '';
+      iconEl.style.backgroundPosition = '';
+      iconEl.innerHTML = svgHtml;
+      iconEl.style.display = '';
+      iconEl.setAttribute('aria-hidden', 'true');
+      tryUseNavSprite(iconEl, iconKey);
+    }
+    textEl.textContent = text;
+    if (state) {
+      state._lastNavBanner = isBanner ? instructionOrBanner : null;
+      state._lastNavInstruction = isBanner ? null : instructionOrBanner;
+      state._lastNavDistM = distM;
+    }
+    hintEl.classList.add('is-updating');
+    clearTimeout(hintEl._hintUpdateTimer);
+    hintEl._hintUpdateTimer = setTimeout(function () {
+      hintEl.classList.remove('is-updating');
+    }, 280);
+  }
+
   function updateInfoRouteStatus() {
     var el = document.getElementById('infoRouteStatus');
     if (!el) return;
@@ -612,6 +934,168 @@
       mapInstance.on('click', onMapClick);
     });
 
+    (function setupSavedPlaces() {
+      var SAVED_PLACES_KEY = 'evTripSavedPlaces';
+      var MAX_PLACES = 8;
+      var pendingPinBySlot = {};
+      var editNameSlotIndex = null;
+
+      function getSavedPlaces() {
+        try {
+          var raw = localStorage.getItem(SAVED_PLACES_KEY);
+          var list = raw ? JSON.parse(raw) : [];
+          return Array.isArray(list) ? list.slice(0, MAX_PLACES) : [];
+        } catch (e) { return []; }
+      }
+      function saveSavedPlaces(list) {
+        try {
+          localStorage.setItem(SAVED_PLACES_KEY, JSON.stringify(list.slice(0, MAX_PLACES)));
+        } catch (e) {}
+      }
+
+      function renderSlots() {
+        var list = getSavedPlaces();
+        var container = document.getElementById('savedPlacesSlots');
+        if (!container) return;
+        container.innerHTML = '';
+        for (var i = 0; i < MAX_PLACES; i++) {
+          var place = list[i] || null;
+          var pending = pendingPinBySlot[i];
+          var row = document.createElement('div');
+          row.className = 'saved-place-slot';
+          var label = document.createElement('span');
+          label.className = 'slot-label';
+          label.textContent = 'Place ' + (i + 1);
+          var input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'slot-input';
+          input.placeholder = 'Pin on map, then Save';
+          input.readOnly = true;
+          if (place) input.value = place.name || (place.lat.toFixed(4) + ', ' + place.lng.toFixed(4));
+          else if (pending) input.value = pending.lat.toFixed(4) + ', ' + pending.lng.toFixed(4);
+          var pinBtn = document.createElement('button');
+          pinBtn.type = 'button';
+          pinBtn.className = 'pin-btn';
+          pinBtn.textContent = 'Pin on map';
+          pinBtn.title = 'Click map to set location';
+          var saveBtn = document.createElement('button');
+          saveBtn.type = 'button';
+          saveBtn.className = 'slot-save-btn';
+          saveBtn.textContent = 'Save';
+          saveBtn.title = 'Save and name this place';
+          saveBtn.disabled = !pending && !place;
+          (function (slotIndex) {
+            pinBtn.addEventListener('click', function () {
+              var mapInstance = MapModule.getMap && MapModule.getMap();
+              if (!mapInstance) { alert('Map not ready.'); return; }
+              if (MapModule.removeTempSavePin) MapModule.removeTempSavePin();
+              mapInstance.getCanvas().style.cursor = 'crosshair';
+              function onMapClick(e) {
+                mapInstance.off('click', onMapClick);
+                mapInstance.getCanvas().style.cursor = '';
+                var lng = e.lngLat.lng, lat = e.lngLat.lat;
+                pendingPinBySlot[slotIndex] = { lng: lng, lat: lat };
+                if (MapModule.setTempSavePin) MapModule.setTempSavePin(lng, lat);
+                renderSlots();
+              }
+              mapInstance.on('click', onMapClick);
+            });
+            saveBtn.addEventListener('click', function () {
+              var pending = pendingPinBySlot[slotIndex];
+              var place = (getSavedPlaces())[slotIndex];
+              if (!pending && !place) return;
+              editNameSlotIndex = slotIndex;
+              var overlay = document.getElementById('editNameModalOverlay');
+              var inputEdit = document.getElementById('editNameInput');
+              if (overlay && inputEdit) {
+                inputEdit.value = place ? (place.name || '') : '';
+                inputEdit.placeholder = 'Place name';
+                overlay.style.display = 'flex';
+                overlay.setAttribute('aria-hidden', 'false');
+                inputEdit.focus();
+              }
+            });
+          })(i);
+          row.appendChild(label);
+          row.appendChild(input);
+          row.appendChild(pinBtn);
+          row.appendChild(saveBtn);
+          container.appendChild(row);
+        }
+      }
+
+      function toggleSavedPlacesPanel() {
+        var panel = document.getElementById('savedPlacesPanel');
+        if (!panel) return;
+        var show = panel.style.display === 'none' || !panel.style.display;
+        panel.style.display = show ? 'block' : 'none';
+        if (show) renderSlots();
+      }
+      if (typeof window !== 'undefined') window.__evToggleSavedPlacesPanel = toggleSavedPlacesPanel;
+
+      var editOverlay = document.getElementById('editNameModalOverlay');
+      var editInput = document.getElementById('editNameInput');
+      document.getElementById('editNameCancel')?.addEventListener('click', function () {
+        if (editOverlay) { editOverlay.style.display = 'none'; editOverlay.setAttribute('aria-hidden', 'true'); }
+        editNameSlotIndex = null;
+      });
+      document.getElementById('editNameSave')?.addEventListener('click', function () {
+        if (editNameSlotIndex == null) return;
+        var name = (editInput && editInput.value && editInput.value.trim()) || ('Saved ' + (editNameSlotIndex + 1));
+        var list = getSavedPlaces();
+        var pending = pendingPinBySlot[editNameSlotIndex];
+        while (list.length <= editNameSlotIndex) list.push(null);
+        var place = list[editNameSlotIndex];
+        var lng = (pending && pending.lng) || (place && place.lng);
+        var lat = (pending && pending.lat) || (place && place.lat);
+        if (lng == null || lat == null) { if (editOverlay) editOverlay.style.display = 'none'; editNameSlotIndex = null; return; }
+        list[editNameSlotIndex] = { id: (place && place.id) || Date.now(), name: name.trim(), lng: lng, lat: lat };
+        saveSavedPlaces(list);
+        pendingPinBySlot[editNameSlotIndex] = null;
+        if (MapModule.removeTempSavePin) MapModule.removeTempSavePin();
+        if (editOverlay) { editOverlay.style.display = 'none'; editOverlay.setAttribute('aria-hidden', 'true'); }
+        editNameSlotIndex = null;
+        renderSlots();
+      });
+
+      var savedDestBtn = document.getElementById('savedDestBtn');
+      var savedDestDropdown = document.getElementById('savedDestDropdown');
+      if (savedDestBtn && savedDestDropdown) {
+        savedDestBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var list = getSavedPlaces().filter(function (p) { return p && p.name; });
+          if (list.length === 0) {
+            savedDestDropdown.style.display = 'none';
+            alert('No saved places. Use Saved Places to pin and save locations.');
+            return;
+          }
+          savedDestDropdown.innerHTML = '';
+          list.forEach(function (place) {
+            var item = document.createElement('div');
+            item.className = 'search-dropdown-item';
+            item.textContent = place.name;
+            item.setAttribute('role', 'button');
+            item.tabIndex = 0;
+            item.addEventListener('click', function () {
+              if (destInput) destInput.value = place.name;
+              state.endCoords = [place.lng, place.lat];
+              MapModule.setEndMarker(state.endCoords);
+              updateInfoRouteStatus();
+              savedDestDropdown.style.display = 'none';
+              if (state.startCoords && state.endCoords) updateRouteFromCoords();
+            });
+            savedDestDropdown.appendChild(item);
+          });
+          savedDestDropdown.style.display = 'block';
+        });
+        document.addEventListener('click', function (e) {
+          if (savedDestDropdown && savedDestDropdown.style.display === 'block' && !savedDestBtn.contains(e.target) && !savedDestDropdown.contains(e.target)) {
+            savedDestDropdown.style.display = 'none';
+          }
+        });
+      }
+    })();
+
     var planBtn = document.getElementById('planRouteBtn');
     var startNavBtn = document.getElementById('startNavBtn');
     var stopRouteBtn = document.getElementById('stopRouteBtn');
@@ -646,51 +1130,84 @@
           if (MapModule.followCar) MapModule.followCar(lng, lat, br);
         },
         function () {},
-        { enableHighAccuracy: true, maximumAge: 5000 }
+        { enableHighAccuracy: true, maximumAge: 0 }
       );
       var lastReroute = 0;
+      var lastNavUpdateTime = null;
+      var lastNavDistTraveledKm = 0;
       var REROUTE_THRESHOLD_KM = 0.01;
       var REROUTE_COOLDOWN_MS = 8000;
       state.watchId = navigator.geolocation.watchPosition(
         function (pos) {
           var lng = pos.coords.longitude;
           var lat = pos.coords.latitude;
+          if (typeof lng !== 'number' || typeof lat !== 'number' || isNaN(lng) || isNaN(lat) || (lng === 0 && lat === 0) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
           var currentSpeedKmh = (pos.coords.speed != null && !isNaN(pos.coords.speed)) ? Math.round(pos.coords.speed * 3.6) : null;
           state.currentSpeedKmh = currentSpeedKmh != null ? currentSpeedKmh : state.maxSpeedKmh;
-          var br = state.route && state.route.coordinates && MapModule.getBearingFromRoute ? MapModule.getBearingFromRoute(state.route.coordinates, lng, lat) : null;
-          var seg = state.route && state.route.coordinates && MapModule.getSegmentIndexFromRoute ? MapModule.getSegmentIndexFromRoute(state.route.coordinates, lng, lat) : 0;
-          var turnOff = state.route && state.route.coordinates && MapModule.getTurnOffsetFromRoute ? MapModule.getTurnOffsetFromRoute(state.route.coordinates, seg) : 0;
-          if (MapModule.setNavigationCarPosition) MapModule.setNavigationCarPosition(lng, lat, br, turnOff);
-          if (MapModule.followCar) MapModule.followCar(lng, lat, br, undefined, state.currentSpeedKmh);
-          updateSpeedSign(pos.coords.speed, state.maxSpeedKmh);
           var routeCoords = (state.route && state.route.coordinates && state.route.coordinates.length >= 2)
             ? state.route.coordinates
             : (state.route && state.route.geometry && state.route.geometry.coordinates && state.route.geometry.coordinates.length >= 2)
               ? state.route.geometry.coordinates
               : null;
           if (!state.route || !routeCoords) return;
+          var br = state.route && state.route.coordinates && MapModule.getBearingFromRoute ? MapModule.getBearingFromRoute(state.route.coordinates, lng, lat) : null;
+          var seg = state.route && state.route.coordinates && MapModule.getSegmentIndexFromRoute ? MapModule.getSegmentIndexFromRoute(state.route.coordinates, lng, lat) : 0;
+          var turnOff = state.route && state.route.coordinates && MapModule.getTurnOffsetFromRoute ? MapModule.getTurnOffsetFromRoute(state.route.coordinates, seg) : 0;
+          if (MapModule.setNavigationCarPosition) MapModule.setNavigationCarPosition(lng, lat, br, turnOff);
+          var distTraveledM = Chargers.distanceAlongRouteToPointKm(routeCoords, lng, lat) * 1000;
+          var banner = (MapModule.getBannerInstruction && state.route && state.route.maneuvers) ? MapModule.getBannerInstruction(state.route, seg, distTraveledM) : null;
+          var t = banner && (banner.type || '').toLowerCase().replace(/_/g, ' ');
+          var mod = banner && (banner.modifier || '').toLowerCase().replace(/_/g, ' ');
+          var isStraightStep = t === 'depart' || (t === 'continue' && (mod === 'straight' || !mod));
+          if (banner && isStraightStep && MapModule.getUpcomingTurnBanner) {
+            var upcoming = MapModule.getUpcomingTurnBanner(state.route, seg, distTraveledM);
+            if (upcoming && upcoming.distanceRemainingM >= 50 && upcoming.distanceRemainingM <= HINT_SHOW_UPCOMING_TURN_AHEAD_M) banner = upcoming;
+          }
+          var instr = MapModule.getNextTurnInstruction ? MapModule.getNextTurnInstruction(routeCoords, seg) : 'Keep straight';
+          if (banner) banner = correctBannerFromGeometry(banner, instr);
+          var nextPt = routeCoords[seg + 1];
+          var distM = nextPt ? Math.round(Chargers.haversineKm(lat, lng, nextPt[1], nextPt[0]) * 1000) : 0;
+          if (MapModule.followCar) MapModule.followCar(lng, lat, br, undefined, state.currentSpeedKmh, {
+            distToTurnM: banner && banner.distanceRemainingM != null ? banner.distanceRemainingM : distM,
+            isTurnOrExit: banner ? isTurnOrExitFromBanner(banner) : !isContinueStraightInstruction(instr),
+          });
+          updateSpeedSign(pos.coords.speed, state.maxSpeedKmh);
           var v = state.vehicle;
           if (v) {
-            var distTraveledKm = Chargers.distanceAlongRouteToPointKm(routeCoords, lng, lat);
-            var navState = Object.assign({}, state, { maxSpeedKmh: state.currentSpeedKmh, useInstantSpeed: true, routeDistanceKm: state.route.distanceKm });
-            var consumedKwh = Trip.tripEnergyKwh(v, distTraveledKm, navState);
-            var currentBattery = Math.max(0, state.startBattery - (consumedKwh / v.battery_kwh * 100));
-            var remainingKm = Math.max(0, state.route.distanceKm - distTraveledKm);
-            var predictedEnd = Trip.batteryAtEnd(v, currentBattery, remainingKm, navState);
-            var rangeKm = Trip.effectiveRangeKm(v, currentBattery, navState);
-            state.startBattery = Math.round(currentBattery);
-            UI.updateHeaderStats(state.startBattery, rangeKm, 'FAST');
-            UI.updateBatterySidebar(state.startBattery, rangeKm);
+            var rawDistTraveledKm = Chargers.distanceAlongRouteToPointKm(routeCoords, lng, lat);
+            var now = Date.now();
+            if (lastNavUpdateTime == null) {
+              lastNavDistTraveledKm = 0;
+            } else {
+              var dtHours = (now - lastNavUpdateTime) / 3600000;
+              var maxIncreaseKm = (state.currentSpeedKmh || 80) * dtHours * 1.3;
+              if (rawDistTraveledKm > lastNavDistTraveledKm + maxIncreaseKm) {
+                rawDistTraveledKm = lastNavDistTraveledKm + maxIncreaseKm;
+              }
+              if (rawDistTraveledKm < lastNavDistTraveledKm - 0.03) {
+                rawDistTraveledKm = lastNavDistTraveledKm - 0.03;
+              }
+            }
+            lastNavUpdateTime = now;
+            lastNavDistTraveledKm = Math.max(0, Math.min(state.route.distanceKm, rawDistTraveledKm));
+            var distTraveledKm = lastNavDistTraveledKm;
+            var tripOpts = buildTripOptions();
             var wpWithDist = (state.waypoints || []).map(function (wp) {
               var d = Chargers.distanceAlongRouteToPointKm(routeCoords, wp.lng, wp.lat);
               return { distKm: d, chargeTo: wp.chargeTo != null ? wp.chargeTo : 100, name: wp.name, lng: wp.lng, lat: wp.lat };
             }).sort(function (a, b) { return a.distKm - b.distKm; });
+            var plannedEndBattery = wpWithDist.length
+              ? Trip.batteryAtEndWithWaypoints(v, state.startBattery, state.route.distanceKm, wpWithDist, tripOpts)
+              : Trip.batteryAtEnd(v, state.startBattery, state.route.distanceKm, tripOpts);
+            var rangeKm = Trip.effectiveRangeKm(v, state.startBattery, tripOpts);
             var nextStopKm = wpWithDist.length ? Math.max(0, wpWithDist[0].distKm - distTraveledKm) : null;
-            var zeroPct = Trip.zeroPointProgress(v, state.startBattery, state.route.distanceKm, wpWithDist, navState);
+            var zeroPct = Trip.zeroPointProgress(v, state.startBattery, state.route.distanceKm, wpWithDist, tripOpts);
+            UI.updateHeaderStats(state.startBattery, rangeKm, 'FAST');
+            UI.updateBatterySidebar(state.startBattery, rangeKm);
             UI.updateBottomBar({
               expectedRangeKm: rangeKm,
               nextStopKm: nextStopKm,
-              endEstPercent: Math.round(predictedEnd),
+              endEstPercent: Math.round(plannedEndBattery),
             });
             var bar = document.getElementById('energyProgressWrap');
             if (bar && window.EVTripPlannerEnergyBar) {
@@ -698,7 +1215,7 @@
               var prevD = 0;
               var cs = wpWithDist.map(function (w) {
                 var progress = state.route.distanceKm > 0 ? Math.max(0, Math.min(1, w.distKm / state.route.distanceKm)) : 0;
-                var arrPct = Math.round(Trip.batteryAtEnd(v, prevB, w.distKm - prevD, navState));
+                var arrPct = Math.round(Trip.batteryAtEnd(v, prevB, w.distKm - prevD, tripOpts));
                 arrPct = Math.max(0, Math.min(100, arrPct));
                 var chargeTo = w.chargeTo != null ? w.chargeTo : 100;
                 var waitMin = Trip.chargingTimeMin(v, arrPct, chargeTo, 50);
@@ -708,7 +1225,7 @@
               });
               window.EVTripPlannerEnergyBar.updateBar(bar, {
                 currentBatteryPercent: state.startBattery,
-                predictedEndPercent: Math.round(predictedEnd),
+                predictedEndPercent: Math.round(plannedEndBattery),
                 tripProgress: distTraveledKm / state.route.distanceKm,
                 chargeStops: cs,
                 zeroPointProgress: zeroPct,
@@ -730,6 +1247,8 @@
             var coords = [[lng, lat]].concat(waypointCoords, [state.endCoords]);
             Routing.getRoute(coords).then(function (newRoute) {
               if (!newRoute) return;
+              lastNavDistTraveledKm = 0;
+              lastNavUpdateTime = Date.now();
               state.route = newRoute;
               state.startCoords = [lng, lat];
               MapModule.removeRouteLayer('ev-trip-route');
@@ -753,12 +1272,21 @@
                 var tripOpts = buildTripOptions();
                 var waypointsWithDist = (state.waypoints && state.waypoints.length && newRoute.coordinates && newRoute.distanceKm) ? state.waypoints.map(function (wp) {
                   var d = Chargers.distanceAlongRouteToPointKm(newRoute.coordinates, wp.lng, wp.lat);
-                  return { distKm: d, chargeTo: wp.chargeTo != null ? wp.chargeTo : 100, name: wp.name };
+                  return { distKm: d, chargeTo: wp.chargeTo != null ? wp.chargeTo : 100, name: wp.name, lng: wp.lng, lat: wp.lat };
                 }).sort(function (a, b) { return a.distKm - b.distKm; }) : [];
                 var endBattery = state.vehicle ? (waypointsWithDist.length ? Trip.batteryAtEndWithWaypoints(state.vehicle, state.startBattery, newRoute.distanceKm, waypointsWithDist, tripOpts) : Trip.batteryAtEnd(state.vehicle, state.startBattery, newRoute.distanceKm, tripOpts)) : 20;
                 var zeroPct = state.vehicle ? Trip.zeroPointProgress(state.vehicle, state.startBattery, newRoute.distanceKm, waypointsWithDist, tripOpts) : 100;
+                var prevB = state.startBattery;
+                var prevD = 0;
                 var cs = waypointsWithDist.map(function (w) {
-                  return { progress: newRoute.distanceKm > 0 ? Math.max(0, Math.min(1, w.distKm / newRoute.distanceKm)) : 0, name: w.name || 'Charging Station' };
+                  var progress = newRoute.distanceKm > 0 ? Math.max(0, Math.min(1, w.distKm / newRoute.distanceKm)) : 0;
+                  var arrPct = state.vehicle ? Math.round(Trip.batteryAtEnd(state.vehicle, prevB, w.distKm - prevD, tripOpts)) : 20;
+                  arrPct = Math.max(0, Math.min(100, arrPct));
+                  var chargeTo = w.chargeTo != null ? w.chargeTo : 100;
+                  var waitMin = state.vehicle ? Trip.chargingTimeMin(state.vehicle, arrPct, chargeTo, 50) : 0;
+                  prevB = chargeTo;
+                  prevD = w.distKm;
+                  return { progress: progress, name: w.name || 'Charging Station', waitingTimeMin: waitMin, lng: w.lng, lat: w.lat };
                 });
                 window.EVTripPlannerEnergyBar.updateBar(bar, { currentBatteryPercent: state.startBattery, predictedEndPercent: Math.round(endBattery), tripProgress: 0, chargeStops: cs, zeroPointProgress: zeroPct, routeDistanceKm: newRoute.distanceKm });
               }
@@ -769,7 +1297,7 @@
           }
         },
         function () {},
-        { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
       );
     });
     if (stopRouteBtn) stopRouteBtn.addEventListener('click', function () {
@@ -780,6 +1308,8 @@
         state.watchId = null;
       }
       if (MapModule.exitNavigationMode) MapModule.exitNavigationMode();
+      var navHintEl = document.getElementById('navRouteHint');
+      if (navHintEl) navHintEl.style.display = 'none';
       updateSpeedSign(null, null);
       updateNavButtons();
     });
@@ -1100,6 +1630,8 @@
       if (MapModule.removeDemoCar) MapModule.removeDemoCar();
       if (MapModule.exitNavigationMode && !state.navigationActive) MapModule.exitNavigationMode();
       updateSpeedSign(null, null);
+      var navHintEl = document.getElementById('navRouteHint');
+      if (navHintEl) navHintEl.style.display = 'none';
       if (runBtn) { runBtn.textContent = 'Run Demo'; runBtn.style.display = ''; }
       if (stopBtn) stopBtn.style.display = 'none';
       applyTripToUI();
@@ -1146,6 +1678,11 @@
       demoStartTime = Date.now();
       demoPausedDuration = 0;
       demoStartBattery = state.startBattery;
+      var lastDemoTickTime = null;
+      var demoDistanceTraveledKm = 0;
+      var demoCurrentCarSpeedKmh = parseInt(carSpeed && carSpeed.value ? carSpeed.value : 20, 10) || 20;
+      var demoCurrentSimMult = parseInt(simSpeed && simSpeed.value ? simSpeed.value : 1, 10) || 1;
+      var DEMO_SPEED_SMOOTH = 0.03;
       var coords = state.route.coordinates;
       if (coords && coords.length >= 2 && MapModule.enterNavigationMode) MapModule.enterNavigationMode();
       if (coords && coords.length >= 2 && MapModule.flyToCar) {
@@ -1164,19 +1701,27 @@
       }
       function tick() {
         if (!demoRunning) return;
-        if (demoPaused) { demoAnimationId = requestAnimationFrame(tick); return; }
+        var now = Date.now();
+        if (demoPaused) {
+          lastDemoTickTime = now;
+          demoAnimationId = requestAnimationFrame(tick);
+          return;
+        }
         var coords = state.route && state.route.coordinates;
         var totalDist = state.route && state.route.distanceKm;
         if (!coords || !coords.length || totalDist == null || totalDist <= 0) {
           demoAnimationId = requestAnimationFrame(tick);
           return;
         }
-        var carSpeedKmh = parseInt(carSpeed && carSpeed.value ? carSpeed.value : 20, 10) || 20;
-        var simMult = parseInt(simSpeed && simSpeed.value ? simSpeed.value : 1, 10) || 1;
-        var elapsedSec = getElapsedSec();
-        var distanceTraveledKm = (carSpeedKmh / 3600) * elapsedSec * simMult;
-        var effectiveKm = Math.max(0, Math.min(totalDist, distanceTraveledKm + demoManualDeltaKm));
-        if (effectiveKm >= totalDist && distanceTraveledKm >= totalDist) {
+        var deltaT = lastDemoTickTime != null ? (now - lastDemoTickTime) / 1000 : 0;
+        lastDemoTickTime = now;
+        var targetCarSpeedKmh = parseInt(carSpeed && carSpeed.value ? carSpeed.value : 20, 10) || 20;
+        var targetSimMult = parseInt(simSpeed && simSpeed.value ? simSpeed.value : 1, 10) || 1;
+        demoCurrentCarSpeedKmh += (targetCarSpeedKmh - demoCurrentCarSpeedKmh) * DEMO_SPEED_SMOOTH;
+        demoCurrentSimMult += (targetSimMult - demoCurrentSimMult) * DEMO_SPEED_SMOOTH;
+        demoDistanceTraveledKm += (demoCurrentCarSpeedKmh / 3600) * deltaT * demoCurrentSimMult;
+        var effectiveKm = Math.max(0, Math.min(totalDist, demoDistanceTraveledKm + demoManualDeltaKm));
+        if (effectiveKm >= totalDist) {
           stopDemo();
           applyTripToUI();
           return;
@@ -1221,6 +1766,8 @@
             demoPausedDuration = 0;
             demoManualDeltaKm = 0;
             demoManualOffsetM = 0;
+            demoDistanceTraveledKm = 0;
+            lastDemoTickTime = Date.now();
             Data.ready.then(function (_ref) {
               var chargerDatabase = _ref.chargerDatabase;
               var chargers = (chargerDatabase && chargerDatabase.chargers) || [];
@@ -1234,9 +1781,25 @@
         }
         var turnOffset = MapModule.getTurnOffsetFromRoute ? MapModule.getTurnOffsetFromRoute(coords, seg) : 0;
         if (window.EVTripPlannerMap && window.EVTripPlannerMap.setDemoCarPosition) window.EVTripPlannerMap.setDemoCarPosition(lng, lat, bearing, turnOffset);
-        if (MapModule.followCar) MapModule.followCar(lng, lat, bearing, true);
-        updateSpeedSign(carSpeedKmh / 3.6, state.maxSpeedKmh);
-        var demoState = Object.assign({}, state, { maxSpeedKmh: carSpeedKmh, useInstantSpeed: true, routeDistanceKm: totalDist });
+        var demoDistTraveledM = effectiveKm * 1000;
+        var banner = (MapModule.getBannerInstruction && state.route && state.route.maneuvers) ? MapModule.getBannerInstruction(state.route, seg, demoDistTraveledM) : null;
+        var t = banner && (banner.type || '').toLowerCase().replace(/_/g, ' ');
+        var mod = banner && (banner.modifier || '').toLowerCase().replace(/_/g, ' ');
+        var isStraightStep = t === 'depart' || (t === 'continue' && (mod === 'straight' || !mod));
+        if (banner && isStraightStep && MapModule.getUpcomingTurnBanner) {
+          var upcoming = MapModule.getUpcomingTurnBanner(state.route, seg, demoDistTraveledM);
+          if (upcoming && upcoming.distanceRemainingM >= 50 && upcoming.distanceRemainingM <= HINT_SHOW_UPCOMING_TURN_AHEAD_M) banner = upcoming;
+        }
+        var instr = MapModule.getNextTurnInstruction ? MapModule.getNextTurnInstruction(coords, seg) : 'Keep straight';
+        if (banner) banner = correctBannerFromGeometry(banner, instr);
+        var nextPt = coords[seg + 1];
+        var distM = nextPt ? Math.round(Chargers.haversineKm(lat, lng, nextPt[1], nextPt[0]) * 1000) : 0;
+        if (MapModule.followCar) MapModule.followCar(lng, lat, bearing, true, demoCurrentCarSpeedKmh, {
+          distToTurnM: banner && banner.distanceRemainingM != null ? banner.distanceRemainingM : distM,
+          isTurnOrExit: banner ? isTurnOrExitFromBanner(banner) : !isContinueStraightInstruction(instr),
+        });
+        updateSpeedSign(demoCurrentCarSpeedKmh / 3.6, state.maxSpeedKmh);
+        var demoState = Object.assign({}, state, { maxSpeedKmh: demoCurrentCarSpeedKmh, useInstantSpeed: true, routeDistanceKm: totalDist });
         var consumptionKwhPerKm = v ? Trip.consumptionPerKm(v, demoState) : 0.2;
         var batteryUsedKwh = effectiveKm * consumptionKwhPerKm;
         var batteryPercent = Math.max(0, demoStartBattery - (batteryUsedKwh / (v ? v.battery_kwh : 60) * 100));

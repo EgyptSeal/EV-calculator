@@ -667,6 +667,12 @@
     var wrap = document.createElement('div');
     wrap.className = className;
     wrap.style.transformOrigin = 'center center';
+    wrap.style.width = FIXED_CAR_MARKER_SIZE_PX + 'px';
+    wrap.style.height = FIXED_CAR_MARKER_SIZE_PX + 'px';
+    wrap.style.minWidth = FIXED_CAR_MARKER_SIZE_PX + 'px';
+    wrap.style.minHeight = FIXED_CAR_MARKER_SIZE_PX + 'px';
+    wrap.style.visibility = 'visible';
+    wrap.style.pointerEvents = 'none';
     var ripples = document.createElement('div');
     ripples.className = 'car-marker-ripples';
     for (var i = 0; i < 3; i++) {
@@ -704,10 +710,29 @@
       cancelAnimationFrame(navCarTweenId);
       navCarTweenId = null;
     }
+    var fromLng = lastNavCarLng != null ? lastNavCarLng : lng;
+    var fromLat = lastNavCarLat != null ? lastNavCarLat : lat;
     lastNavCarLng = lng;
     lastNavCarLat = lat;
-    markers.navCar.setLngLat([lng, lat]);
-    setCarMarkerRotation(markers.navCar, turnOffsetDeg != null ? turnOffsetDeg : lastCarTurnOffset);
+    var startTime = null;
+    var durationMs = 180;
+    function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+    function tween(now) {
+      if (startTime == null) startTime = now;
+      var elapsed = now - startTime;
+      var t = Math.min(1, elapsed / durationMs);
+      var eased = easeOutCubic(t);
+      var x = fromLng + (lng - fromLng) * eased;
+      var y = fromLat + (lat - fromLat) * eased;
+      markers.navCar.setLngLat([x, y]);
+      setCarMarkerRotation(markers.navCar, turnOffsetDeg != null ? turnOffsetDeg : lastCarTurnOffset);
+      if (t < 1) {
+        navCarTweenId = requestAnimationFrame(tween);
+      } else {
+        navCarTweenId = null;
+      }
+    }
+    navCarTweenId = requestAnimationFrame(tween);
     updateCarMarkerSizes();
   }
 
@@ -750,10 +775,14 @@
   }
 
   function setDemoCarPosition(lng, lat, bearing, turnOffsetDeg) {
-    if (!map) return;
+    var mapboxgl = global.mapboxgl || (typeof window !== 'undefined' && window.mapboxgl);
+    if (!map || !mapboxgl) return;
+    if (typeof lng !== 'number' || typeof lat !== 'number' || isNaN(lng) || isNaN(lat)) return;
     if (!markers.demoCar) {
       const el = createCarMarkerElement('demo-car-marker');
-      markers.demoCar = new mapboxgl.Marker({ element: el, anchor: 'center' }).setLngLat([lng, lat]).addTo(map);
+      markers.demoCar = new mapboxgl.Marker({ element: el, anchor: 'center' })
+        .setLngLat([lng, lat])
+        .addTo(map);
     }
     markers.demoCar.setLngLat([lng, lat]);
     setCarMarkerRotation(markers.demoCar, turnOffsetDeg);

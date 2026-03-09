@@ -489,20 +489,30 @@ html.theme-light .app-title { animation: none; color: var(--accent-cyan); }
 .header-stats {
   display: flex;
   align-items: center;
-  gap: 16px;
-  font-size: 0.78rem;
-  font-weight: 500;
+  gap: 20px;
+  font-size: 0.95rem;
+  font-weight: 600;
   color: var(--text-secondary);
   letter-spacing: 0.04em;
+  min-width: 320px;
+  padding: 4px 12px;
 }
 .header-stats span { color: var(--accent-cyan); }
-.header-stats .stat-value { color: var(--text-primary); font-weight: 700; }
+.header-stats .stat-value { color: var(--text-primary); font-weight: 700; font-size: 1.08rem; }
 
 .header-controls {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+}
+.header-controls-map-style {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: -8px;
+  padding-right: 12px;
+  border-right: 1px solid var(--border-glow);
 }
 
 .header-btn {
@@ -695,6 +705,146 @@ html.theme-light .app-title { animation: none; color: var(--accent-cyan); }
 }
 .speed-sign-slowdown.visible { display: block; }
 
+/* Navigation instruction box – Google Maps–style turn-by-turn (top center) */
+.nav-instruction-box-wrap {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  pointer-events: none;
+  width: 100%;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.nav-instruction-box {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  min-height: 88px;
+  padding: 14px 18px;
+  background: rgba(20, 20, 20, 0.85);
+  border-radius: 18px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.25s ease;
+}
+.nav-instruction-box.animate-in {
+  animation: navInstructionBounce 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes navInstructionBounce {
+  0% { transform: translateY(-12px); opacity: 0.7; }
+  70% { transform: translateY(2px); }
+  100% { transform: translateY(0); opacity: 1; }
+}
+.nav-instruction-icon {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.nav-instruction-icon svg {
+  width: 48px;
+  height: 48px;
+  fill: var(--accent-cyan);
+  filter: drop-shadow(0 0 8px var(--accent-cyan-dim));
+}
+.nav-instruction-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  justify-content: center;
+}
+.nav-instruction-main {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+}
+.nav-instruction-street {
+  font-size: 16px;
+  color: var(--text-secondary);
+  line-height: 1.25;
+}
+.nav-instruction-distance {
+  flex-shrink: 0;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  min-width: 72px;
+  text-align: right;
+}
+.nav-instruction-distance.now {
+  color: var(--accent-green);
+  animation: navNowPulse 0.6s ease-in-out infinite;
+}
+@keyframes navNowPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.02); }
+}
+.nav-instruction-next {
+  width: 100%;
+  padding: 8px 14px;
+  background: rgba(20, 20, 20, 0.7);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.nav-instruction-next-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--text-secondary);
+}
+.nav-instruction-next-text {
+  font-size: 14px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+/* Nav instruction & next stop – theme (day/night) and theme color */
+html.theme-dark .nav-instruction-box,
+html:not(.theme-light) .nav-instruction-box {
+  background: rgba(20, 20, 20, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+}
+html.theme-light .nav-instruction-box {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
+}
+html.theme-dark .nav-instruction-next,
+html:not(.theme-light) .nav-instruction-next {
+  background: rgba(20, 20, 20, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+html.theme-light .nav-instruction-next {
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+html.theme-light .nav-instruction-main,
+html.theme-light .nav-instruction-street,
+html.theme-light .nav-instruction-next-text { color: var(--text-primary); }
+html.theme-light .nav-instruction-next-label { color: var(--text-secondary); }
+html.theme-light .nav-instruction-distance { color: var(--accent-cyan); }
+html.theme-light .nav-instruction-icon svg { fill: var(--accent-cyan); filter: drop-shadow(0 0 8px rgba(0, 212, 255, 0.4)); }
+
 /* ============================================================
    APP CONTENT & MAP ROW (left panel | map | right panel)
    ============================================================ */
@@ -812,7 +962,11 @@ html.theme-light .app-title { animation: none; color: var(--accent-cyan); }
   50% { filter: drop-shadow(0 0 6px rgba(255,255,255,1)) drop-shadow(0 0 16px rgba(0, 212, 255, 1)) drop-shadow(0 0 24px rgba(0, 212, 255, 0.5)); }
 }
 
-/* Car markers: blue circle, white border, animated ripple waves */
+/* Car markers: blue circle, white border, animated ripple waves – ensure visible above map */
+#map .mapboxgl-marker:has(.nav-car-marker),
+#map .mapboxgl-marker:has(.demo-car-marker) {
+  z-index: 100 !important;
+}
 .mapboxgl-marker .nav-car-marker,
 .mapboxgl-marker .demo-car-marker {
   border: none !important; background: transparent !important;
@@ -821,12 +975,14 @@ html.theme-light .app-title { animation: none; color: var(--accent-cyan); }
 .nav-car-marker,
 .demo-car-marker {
   position: relative;
-  display: flex;
+  display: flex !important;
   align-items: center;
   justify-content: center;
   border: none !important;
   background: transparent !important;
   pointer-events: none;
+  visibility: visible !important;
+  opacity: 1 !important;
 }
 .car-marker-ripples {
   position: absolute;

@@ -163,10 +163,12 @@
     if (options.useInstantSpeed && options.maxSpeedKmh != null) {
       speedMult = speedMultiplier(options.maxSpeedKmh);
     } else if (avgSpeedKmh != null && avgSpeedKmh > 0) {
-      /* Factor in maxSpeedKmh: user's limit caps our speed assumption. Lower max = less consumption. */
+      /* User's max speed must affect both range and trip end battery: cap assumed speed by maxSpeedKmh
+         so that lower max = less consumption = higher end battery; higher max allows up to route average. */
       const effectiveSpeed = Math.min(avgSpeedKmh, maxSpeedKmh * 0.95);
       speedMult = speedMultiplier(effectiveSpeed);
     } else {
+      /* No route average: use maxSpeedKmh for weighted road-type speed (range and any end estimate). */
       speedMult = roadTypeWeightedSpeedMultiplier(routeKm, maxSpeedKmh);
     }
 

@@ -131,20 +131,20 @@
   <header class="app-header">
     <span class="app-title">EV TRIP PLANNER</span>
     <div class="header-controls">
-      <div class="theme-color-picker" title="Theme color">
-        <button type="button" class="theme-color-swatch" data-theme-color="blue" aria-label="Blue theme" title="Blue"></button>
-        <button type="button" class="theme-color-swatch" data-theme-color="red" aria-label="Red theme" title="Red"></button>
-        <button type="button" class="theme-color-swatch" data-theme-color="green" aria-label="Green theme" title="Green"></button>
-        <button type="button" class="theme-color-swatch" data-theme-color="purple" aria-label="Purple theme" title="Purple"></button>
-        <button type="button" class="theme-color-swatch" data-theme-color="pink" aria-label="Pink theme" title="Pink"></button>
-        <button type="button" class="theme-color-swatch" data-theme-color="yellow" aria-label="Yellow theme" title="Yellow"></button>
+      <div class="header-controls-map-style">
+        <div class="theme-color-picker" title="Theme color">
+          <button type="button" class="theme-color-swatch" data-theme-color="blue" aria-label="Blue theme" title="Blue"></button>
+          <button type="button" class="theme-color-swatch" data-theme-color="red" aria-label="Red theme" title="Red"></button>
+          <button type="button" class="theme-color-swatch" data-theme-color="green" aria-label="Green theme" title="Green"></button>
+          <button type="button" class="theme-color-swatch" data-theme-color="purple" aria-label="Purple theme" title="Purple"></button>
+          <button type="button" class="theme-color-swatch" data-theme-color="pink" aria-label="Pink theme" title="Pink"></button>
+          <button type="button" class="theme-color-swatch" data-theme-color="yellow" aria-label="Yellow theme" title="Yellow"></button>
+        </div>
+        <button type="button" class="btn-theme" id="themeToggle" title="Toggle dark/light theme">Map: Dark</button>
       </div>
-      <button type="button" class="btn-theme" id="themeToggle" title="Toggle dark/light theme">Map: Dark</button>
       <button type="button" class="btn-theme trip-setup-3d-blue" id="tripSetupBtn" title="Vehicle & trip settings">Trip setup</button>
       <button type="button" class="btn-theme" id="savedPlacesBtn" title="Saved places">Saved Places</button>
       <button type="button" class="header-btn header-btn-cancel" id="btnCancelTrip" title="Cancel current trip">Cancel Trip</button>
-      <button type="button" class="header-btn header-btn-restart" id="btnRestart" title="Restart trip">Restart</button>
-      <button type="button" class="header-btn header-btn-refresh" id="btnRefresh" title="Refresh">Refresh</button>
       <button type="button" class="header-btn header-btn-fullscreen" id="btnFullscreen" title="Toggle fullscreen">Full screen</button>
       <button type="button" class="header-btn header-btn-replan" id="btnReplan" title="Re-plan from scratch">Re-plan</button>
     </div>
@@ -209,6 +209,20 @@
         <div class="map-container">
           <div id="map" aria-label="Route map"></div>
           <div class="map-placeholder" id="mapPlaceholder">Loading map…</div>
+          <div class="nav-instruction-box-wrap" id="navInstructionBoxWrap" aria-live="polite" style="display:none;">
+            <div class="nav-instruction-box" id="navInstructionBox">
+              <div class="nav-instruction-icon" id="navInstructionIcon"></div>
+              <div class="nav-instruction-content">
+                <div class="nav-instruction-main" id="navInstructionMain">Continue straight</div>
+                <div class="nav-instruction-street" id="navInstructionStreet"></div>
+              </div>
+              <div class="nav-instruction-distance" id="navInstructionDistance">—</div>
+            </div>
+            <div class="nav-instruction-next" id="navInstructionNext">
+              <span class="nav-instruction-next-label">NEXT</span>
+              <span class="nav-instruction-next-text" id="navInstructionNextText">—</span>
+            </div>
+          </div>
           <div class="speed-sign-overlay" id="speedSignOverlay">
             <div class="speed-sign-inner">
               <span class="speed-sign-value" id="speedSignValue">—</span>

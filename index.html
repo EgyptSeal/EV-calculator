@@ -218,7 +218,7 @@
               </div>
               <div class="nav-instruction-distance" id="navInstructionDistance">—</div>
             </div>
-            <div class="nav-instruction-next" id="navInstructionNext">
+            <div class="nav-instruction-next" id="navInstructionNext" style="display: none;">
               <span class="nav-instruction-next-label">NEXT</span>
               <span class="nav-instruction-next-text" id="navInstructionNextText">—</span>
             </div>
@@ -287,6 +287,13 @@
           </div>
         </div>
       </div>
+        <div class="dev-tuning-panel" id="devTuningPanel">
+          <button type="button" class="dev-tuning-toggle" id="devTuningToggle" aria-expanded="false">Developer: Energy tuning</button>
+          <div class="dev-tuning-body" id="devTuningBody" style="display:none;">
+            <div class="dev-tuning-grid" id="devTuningGrid"></div>
+            <button type="button" class="btn btn-secondary btn-sm" id="devTuningReset">Reset to defaults</button>
+          </div>
+        </div>
       </aside>
     </div>
 
@@ -399,6 +406,7 @@
     }
   </script>
   <script src="js/config.js"></script>
+  <script src="js/energy-model-config.js"></script>
   <script src="data/embedded.js"></script>
   <script src="js/data-loader.js"></script>
   <script src="js/weather.js"></script>

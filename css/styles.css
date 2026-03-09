@@ -733,15 +733,14 @@ html.theme-light .app-title { animation: none; color: var(--accent-cyan); }
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.25s ease;
+  transition: opacity 0.2s ease;
 }
 .nav-instruction-box.animate-in {
-  animation: navInstructionBounce 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: navInstructionFade 0.2s ease-out;
 }
-@keyframes navInstructionBounce {
-  0% { transform: translateY(-12px); opacity: 0.7; }
-  70% { transform: translateY(2px); }
-  100% { transform: translateY(0); opacity: 1; }
+@keyframes navInstructionFade {
+  0% { opacity: 0.92; }
+  100% { opacity: 1; }
 }
 .nav-instruction-icon {
   flex-shrink: 0;
@@ -782,7 +781,7 @@ html.theme-light .app-title { animation: none; color: var(--accent-cyan); }
   font-size: 26px;
   font-weight: 700;
   color: var(--accent-cyan);
-  min-width: 72px;
+  min-width: 88px;
   text-align: right;
 }
 .nav-instruction-distance.now {
@@ -804,6 +803,20 @@ html.theme-light .app-title { animation: none; color: var(--accent-cyan); }
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.nav-next-pop-in {
+  animation: navNextPopIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+.nav-next-pop-out {
+  animation: navNextPopOut 0.22s ease-in forwards;
+}
+@keyframes navNextPopIn {
+  0% { opacity: 0; transform: scale(0.85); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes navNextPopOut {
+  0% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.9); }
 }
 .nav-instruction-next-label {
   font-size: 11px;
@@ -962,15 +975,21 @@ html.theme-light .nav-instruction-icon svg { fill: var(--accent-cyan); filter: d
   50% { filter: drop-shadow(0 0 6px rgba(255,255,255,1)) drop-shadow(0 0 16px rgba(0, 212, 255, 1)) drop-shadow(0 0 24px rgba(0, 212, 255, 0.5)); }
 }
 
-/* Car markers: blue circle, white border, animated ripple waves – ensure visible above map */
+/* Car markers: 3D look, shadow, no box/border */
 #map .mapboxgl-marker:has(.nav-car-marker),
 #map .mapboxgl-marker:has(.demo-car-marker) {
   z-index: 100 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
 }
 .mapboxgl-marker .nav-car-marker,
 .mapboxgl-marker .demo-car-marker {
-  border: none !important; background: transparent !important;
-  box-shadow: none !important; outline: none !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
 }
 .nav-car-marker,
 .demo-car-marker {
@@ -980,16 +999,39 @@ html.theme-light .nav-instruction-icon svg { fill: var(--accent-cyan); filter: d
   justify-content: center;
   border: none !important;
   background: transparent !important;
+  outline: none !important;
   pointer-events: none;
   visibility: visible !important;
   opacity: 1 !important;
+  overflow: visible;
+  /* 3D tilt: car sits on the map */
+  transform: perspective(320px) rotateX(12deg);
+  transform-style: preserve-3d;
+}
+/* Ground shadow under the car (ellipse) */
+.nav-car-marker::before,
+.demo-car-marker::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 58%;
+  width: 55%;
+  height: 22%;
+  transform: translate(-50%, -50%) rotateX(90deg);
+  background: radial-gradient(ellipse 80% 50%, rgba(0,0,0,0.35) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+.nav-car-marker .car-marker-icon,
+.demo-car-marker .car-marker-icon {
+  filter: drop-shadow(0 4px 8px rgba(0,0,0,0.35)) drop-shadow(0 2px 4px rgba(0,0,0,0.2));
 }
 .car-marker-ripples {
   position: absolute;
-  left: -75%;
-  top: -75%;
-  width: 250%;
-  height: 250%;
+  left: -35%;
+  top: -35%;
+  width: 170%;
+  height: 170%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -999,12 +1041,12 @@ html.theme-light .nav-instruction-icon svg { fill: var(--accent-cyan); filter: d
   position: absolute;
   width: 100%;
   height: 100%;
-  border: 12px solid var(--car-ripple);
+  border: 6px solid var(--car-ripple);
   border-radius: 50%;
   animation: carMarkerRipple 2s ease-out infinite;
-  transform: scale(0.3);
+  transform: scale(0.4);
   opacity: 1;
-  box-shadow: 0 0 20px var(--car-ripple), 0 0 40px var(--car-ripple);
+  box-shadow: 0 0 8px var(--car-ripple), 0 0 16px var(--car-ripple);
 }
 .car-marker-dot {
   position: relative;
@@ -1018,14 +1060,26 @@ html.theme-light .nav-instruction-icon svg { fill: var(--accent-cyan); filter: d
   border: 4px solid #fff;
   box-shadow: 0 0 0 2px rgba(0, 120, 255, 0.5), 0 2px 8px rgba(0,0,0,0.25);
 }
+.car-marker-icon {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+  pointer-events: none;
+  user-select: none;
+  display: block;
+  background: transparent !important;
+}
 @keyframes carMarkerRipple {
   0% {
-    transform: scale(0.3);
+    transform: scale(0.4);
     opacity: 1;
     border-color: var(--car-ripple);
   }
   100% {
-    transform: scale(1.4);
+    transform: scale(0.95);
     opacity: 0;
     border-color: transparent;
   }
@@ -1961,7 +2015,7 @@ html.theme-light .bottom-bar {
 }
 
 .bottom-bar-cell {
-  padding: 0 16px;
+  padding: 0 20px;
   border-right: 1px solid var(--border-glow);
   text-align: center;
   position: relative;
@@ -1985,18 +2039,18 @@ html.theme-light .bottom-bar {
 .bottom-bar-cell:last-child { border-right: none; }
 
 .bottom-bar-cell .cell-label {
-  font-size: 0.63rem; letter-spacing: 0.1em;
+  font-size: 0.8rem; letter-spacing: 0.1em;
   color: var(--accent-cyan); text-transform: uppercase;
-  margin-bottom: 4px; font-weight: 600;
+  margin-bottom: 6px; font-weight: 600;
 }
 .bottom-bar-cell .cell-value {
   font-family: 'Orbitron', sans-serif;
-  font-size: 1.05rem; font-weight: 700;
+  font-size: 1.35rem; font-weight: 700;
   color: var(--text-primary);
   transition: color 0.3s;
 }
 .bottom-bar-cell .cell-sub {
-  font-size: 0.72rem; color: var(--text-secondary); margin-top: 2px;
+  font-size: 0.9rem; color: var(--text-secondary); margin-top: 4px;
 }
 
 /* ============================================================
@@ -2400,6 +2454,23 @@ html.theme-light .vehicle-modal .vehicle-card.selected,
 }
 .route-select-item .route-dist { font-weight: 600; color: var(--text-primary); }
 .route-select-item .route-ev { font-size: 0.9rem; color: var(--accent-green); }
+
+/* ============================================================
+   DEVELOPER ENERGY TUNING PANEL
+   ============================================================ */
+.dev-tuning-panel { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border-glow); }
+.dev-tuning-toggle {
+  width: 100%; text-align: left; padding: 8px 10px; font-size: 0.7rem; font-weight: 600;
+  color: var(--text-secondary); background: var(--input-bg); border: 1px solid var(--border-glow);
+  border-radius: 6px; cursor: pointer;
+}
+.dev-tuning-toggle:hover { color: var(--accent-cyan); }
+.dev-tuning-body { margin-top: 8px; padding: 8px; background: var(--input-bg); border-radius: 6px; }
+.dev-tuning-grid { display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto; margin-bottom: 8px; }
+.dev-tuning-row { display: flex; align-items: center; gap: 8px; }
+.dev-tuning-row label.dev-tuning-label { flex: 1; font-size: 0.65rem; color: var(--text-secondary); min-width: 0; }
+.dev-tuning-row input { width: 72px; padding: 4px 6px; font-size: 0.7rem; border: 1px solid var(--border-glow); border-radius: 4px; background: var(--bg-panel); color: var(--text-primary); }
+.btn-sm { font-size: 0.7rem; padding: 6px 10px; }
 
 /* ============================================================
    RTL SUPPORT

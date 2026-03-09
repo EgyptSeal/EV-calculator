@@ -1,0 +1,62 @@
+How to see the 3D car in EV Trip Planner
+=========================================
+
+Step 1 – Put the 3D car model in place
+--------------------------------------
+• Copy your GLB file into the app’s assets folder:
+    ev-trip-planner/assets/byd_sealion_7_ultra_2026.glb
+
+• If your file has a different name, either:
+  - Rename it to: byd_sealion_7_ultra_2026.glb
+  - Or change the path in js/map.js: search for CAR_GLB_URL and set it to your filename (e.g. 'assets/your_car.glb').
+
+
+Step 2 – Start a local web server
+---------------------------------
+• Open a terminal (Command Prompt or PowerShell).
+• Go to the ev-trip-planner folder, for example:
+    cd C:\Users\hussa\Downloads\Compressed\EVNavWebView_Project\ev-trip-planner
+
+• Start a simple server (you must use HTTP, not double‑clicking the HTML file):
+
+  Option A – Node (if you have Node.js):
+    npx serve
+
+  Option B – Python:
+    python -m http.server 8080
+
+• Leave this terminal open while you use the app.
+
+
+Step 3 – Open the app in your browser
+-------------------------------------
+• Open your browser and go to:
+  - If you used "npx serve":   http://localhost:3000
+  - If you used Python 8080:   http://localhost:8080
+
+• You should see the EV Trip Planner page with the map.
+
+
+Step 4 – Make the 3D car appear
+-------------------------------
+The 3D car is shown when the app is in “navigation” or “demo” mode.
+
+  Option A – Start a trip (navigation):
+  1. Click “Trip setup” or use the trip/route controls.
+  2. Set a start and destination and start the route.
+  3. Start navigation.
+  4. The 3D car appears at your position and follows the route.
+
+  Option B – Demo drive (no real route):
+  1. Use the demo / “Drive demo” or similar control if your app has it.
+  2. When the demo starts, the 3D car appears and moves along the demo path.
+
+• The map will follow the car (pitch, zoom, bearing) and the car will rotate with the direction of travel.
+
+
+Step 5 – If you still see the PNG car
+------------------------------------
+• Check the browser console (F12 → Console) for errors like “GLB load error” or 404.
+• Confirm the GLB file is at: ev-trip-planner/assets/byd_sealion_7_ultra_2026.glb
+• Confirm you opened the app via http://localhost:... and not as file:///...
+• Refresh the page (Ctrl+F5) and start navigation or demo again.

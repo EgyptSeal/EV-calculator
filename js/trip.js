@@ -1,13 +1,17 @@
 /**
  * Trip energy prediction – physics-based consumption model.
- * Based on: base consumption, speed, road types, elevation, temperature, wind, traffic, load, HVAC.
- * Goal: Tesla / ABRP-level accuracy.
+ * Uses: base consumption, speed (non-linear aero), road type, elevation, temperature,
+ * load, HVAC, driver behavior, calibration factor, live adaptation.
  */
 (function (global) {
   const C = global.EVTripPlannerConfig?.routing || {};
   const miToKm = C.miToKm || 1.60934;
   const lowBatteryPercent = C.lowBatteryWarningPercent ?? 5;
   const costPerKwh = C.costPerKwhEGP ?? 4.5;
+
+  function getTuning() {
+    return global.ENERGY_MODEL_TUNING || {};
+  }
 
   /** Normalize vehicle fields – support both old and new schema. */
   function getVehicleFields(v) {
@@ -21,7 +25,6 @@
 
   /**
    * Base consumption (kWh/km) = battery_capacity_kwh / epa_range_km
-   * Example BYD Song L 662: 87 / 425 = 0.204 kWh/km
    */
   function baseConsumptionKwhPerKm(vehicle) {
     const f = getVehicleFields(vehicle);
@@ -30,24 +33,44 @@
   }
 
   /**
-   * Speed multiplier table (spec):
-   * 40→0.85, 60→0.95, 80→1.0, 100→1.12, 120→1.30, 140→1.55
+   * Speed efficiency curve (smooth, non-linear):
+   * Best efficiency in moderate city/mixed (45–75 km/h), worse in stop-go, clearly worse at highway, much worse at very high speed.
+   * Uses tuning: speed_best_efficiency_kmh, speed_highway_threshold_kmh, speed_very_high_threshold_kmh, aerodynamic multipliers.
    */
-  const SPEED_MULTIPLIERS = [
-    [40, 0.85], [60, 0.95], [80, 1.0], [100, 1.12], [120, 1.30], [140, 1.55],
-  ];
-
   function speedMultiplier(speedKmh) {
-    const s = Math.max(20, Math.min(160, speedKmh));
-    for (let i = 0; i < SPEED_MULTIPLIERS.length - 1; i++) {
-      const [v1, m1] = SPEED_MULTIPLIERS[i];
-      const [v2, m2] = SPEED_MULTIPLIERS[i + 1];
-      if (s <= v2) {
-        const t = (s - v1) / (v2 - v1);
-        return m1 + t * (m2 - m1);
-      }
+    var T = getTuning();
+    var best = T.speed_best_efficiency_kmh != null ? T.speed_best_efficiency_kmh : 55;
+    var h90 = T.speed_highway_threshold_kmh != null ? T.speed_highway_threshold_kmh : 90;
+    var h110 = T.speed_very_high_threshold_kmh != null ? T.speed_very_high_threshold_kmh : 110;
+    var aero90 = T.aerodynamic_speed_multiplier_90 != null ? T.aerodynamic_speed_multiplier_90 : 1.08;
+    var aero110 = T.aerodynamic_speed_multiplier_110 != null ? T.aerodynamic_speed_multiplier_110 : 1.22;
+    var exp = T.speed_curve_exponent != null ? T.speed_curve_exponent : 1.65;
+    var stopGo = T.stop_go_penalty != null ? T.stop_go_penalty : 1.12;
+    var cityBonus = T.city_efficiency_bonus != null ? T.city_efficiency_bonus : 0.95;
+    var highwayPenalty = T.highway_penalty_above_100 != null ? T.highway_penalty_above_100 : 1.15;
+
+    var s = Math.max(5, Math.min(160, speedKmh));
+
+    if (s <= 25) {
+      var t = s / 25;
+      return 0.92 + (1 - t) * (stopGo - 0.92);
     }
-    return SPEED_MULTIPLIERS[SPEED_MULTIPLIERS.length - 1][1];
+    if (s <= best) {
+      var t = (s - 25) / (best - 25);
+      return 0.92 + t * (1.0 - 0.92);
+    }
+    if (s <= h90) {
+      var t = (s - best) / (h90 - best);
+      return 1.0 + t * (aero90 - 1.0);
+    }
+    if (s <= h110) {
+      var t = (s - h90) / (h110 - h90);
+      var mult = aero90 + t * (aero110 - aero90);
+      return mult;
+    }
+    var excess = (s - h110) / 30;
+    var extra = Math.pow(Math.min(excess, 2), exp) * 0.28;
+    return Math.min(1.85, aero110 + extra);
   }
 
   /**
@@ -142,16 +165,32 @@
   }
 
   /**
-   * Driving mode: eco -8%, aggressive +15%
+   * Driving mode (trip setup) or live driving style score (0–1: efficient→aggressive).
+   * Uses tuning: efficient_multiplier, normal_multiplier, dynamic_multiplier, aggressive_multiplier.
    */
   function drivingModeFactor(mode) {
-    if (mode === 'eco') return 0.92;
-    if (mode === 'aggressive') return 1.15;
-    return 1.0;
+    if (mode === 'eco') return (getTuning().efficient_multiplier != null ? getTuning().efficient_multiplier : 0.92);
+    if (mode === 'aggressive') return (getTuning().aggressive_multiplier != null ? getTuning().aggressive_multiplier : 1.15);
+    return (getTuning().normal_multiplier != null ? getTuning().normal_multiplier : 1.0);
+  }
+
+  /** drivingStyleScore: 0=efficient, 0.33=normal, 0.66=dynamic, 1=aggressive. Interpolates tuning multipliers. */
+  function driverBehaviorMultiplier(drivingStyleScore) {
+    if (drivingStyleScore == null || typeof drivingStyleScore !== 'number') return 1.0;
+    var T = getTuning();
+    var eff = T.efficient_multiplier != null ? T.efficient_multiplier : 0.92;
+    var norm = T.normal_multiplier != null ? T.normal_multiplier : 1.0;
+    var dyn = T.dynamic_multiplier != null ? T.dynamic_multiplier : 1.08;
+    var agg = T.aggressive_multiplier != null ? T.aggressive_multiplier : 1.18;
+    var s = Math.max(0, Math.min(1, drivingStyleScore));
+    if (s <= 0.33) return eff + (s / 0.33) * (norm - eff);
+    if (s <= 0.66) return norm + ((s - 0.33) / 0.33) * (dyn - norm);
+    return dyn + ((s - 0.66) / 0.34) * (agg - dyn);
   }
 
   /**
-   * Adjusted consumption (kWh/km) combining all factors.
+   * Adjusted consumption (kWh/km). Final value = raw × base_calibration_factor × liveConsumptionBias.
+   * Planned max speed strongly influences initial prediction; useInstantSpeed + maxSpeedKmh for live.
    */
   function consumptionPerKm(vehicle, options = {}) {
     const base = baseConsumptionKwhPerKm(vehicle);
@@ -160,15 +199,13 @@
     const avgSpeedKmh = options.averageSpeedKmh ?? null;
 
     let speedMult;
-    if (options.useInstantSpeed && options.maxSpeedKmh != null) {
-      speedMult = speedMultiplier(options.maxSpeedKmh);
+    if (options.useInstantSpeed && (options.maxSpeedKmh != null || options.actualSpeedKmh != null)) {
+      var liveSpeed = options.actualSpeedKmh != null ? options.actualSpeedKmh : options.maxSpeedKmh;
+      speedMult = speedMultiplier(liveSpeed);
     } else if (avgSpeedKmh != null && avgSpeedKmh > 0) {
-      /* User's max speed must affect both range and trip end battery: cap assumed speed by maxSpeedKmh
-         so that lower max = less consumption = higher end battery; higher max allows up to route average. */
-      const effectiveSpeed = Math.min(avgSpeedKmh, maxSpeedKmh * 0.95);
+      var effectiveSpeed = Math.min(avgSpeedKmh, maxSpeedKmh * 0.95);
       speedMult = speedMultiplier(effectiveSpeed);
     } else {
-      /* No route average: use maxSpeedKmh for weighted road-type speed (range and any end estimate). */
       speedMult = roadTypeWeightedSpeedMultiplier(routeKm, maxSpeedKmh);
     }
 
@@ -179,8 +216,12 @@
     const loadFact = loadFactor(options.passengers, options.luggageKg);
     const hvacFact = hvacFactor(options.acOn !== false, options.ambientTempC, options.cabinTempC);
     const modeFact = drivingModeFactor(options.drivingMode);
+    const driverFact = driverBehaviorMultiplier(options.drivingStyleScore);
 
-    const adjusted = base * speedMult * elevFactor * tempFactor * windFact * trafficFact * loadFact * hvacFact * modeFact;
+    var raw = base * speedMult * elevFactor * tempFactor * windFact * trafficFact * loadFact * hvacFact * modeFact * driverFact;
+    var cal = (getTuning().base_calibration_factor != null ? getTuning().base_calibration_factor : 0.97);
+    var bias = (options.liveConsumptionBias != null && options.liveConsumptionBias > 0) ? options.liveConsumptionBias : 1.0;
+    const adjusted = raw * cal * bias;
     return Math.max(0.05, adjusted);
   }
 
@@ -298,10 +339,30 @@
     return percent <= lowBatteryPercent;
   }
 
+  /**
+   * Segment-based energy (kWh) for route segments. Options can vary per segment (elevation, urban/highway).
+   * Returns array of { distKm, kWh } and total kWh.
+   */
+  function tripEnergyKwhSegmented(vehicle, segments, options = {}) {
+    if (!segments || segments.length === 0) return { segmentKwh: [], totalKwh: 0 };
+    var segmentKwh = [];
+    var totalKwh = 0;
+    for (var i = 0; i < segments.length; i++) {
+      var seg = segments[i];
+      var distKm = typeof seg === 'number' ? seg : (seg.distKm ?? seg.distanceKm ?? 0);
+      var segOpts = Object.assign({}, options, typeof seg === 'object' ? seg : {});
+      var kwh = tripEnergyKwh(vehicle, distKm, segOpts);
+      segmentKwh.push({ distKm: distKm, kWh: kwh });
+      totalKwh += kwh;
+    }
+    return { segmentKwh: segmentKwh, totalKwh: totalKwh };
+  }
+
   global.EVTripPlannerTrip = {
     effectiveRangeKm,
     consumptionPerKm,
     tripEnergyKwh,
+    tripEnergyKwhSegmented,
     batteryAtEnd,
     batteryAtEndWithWaypoints,
     zeroPointProgress,
@@ -312,5 +373,7 @@
     miToKm,
     baseConsumptionKwhPerKm,
     speedMultiplier,
+    getTuning: getTuning,
+    driverBehaviorMultiplier,
   };
 })(window);

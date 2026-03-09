@@ -11,6 +11,9 @@
   let lastNavCarLng = null;
   let lastNavCarLat = null;
   let navCarTweenId = null;
+  let lastDemoCarLng = null;
+  let lastDemoCarLat = null;
+  let demoCarTweenId = null;
   let navCarTarget = null;
   let navigationMode = false;
   let previewBlinkInterval = null;
@@ -94,6 +97,7 @@
         zoom: userLocation ? 14 : (C.defaultZoom || 10),
         maxZoom: C.maxZoom || 18,
         minZoom: C.minZoom || 4,
+        antialias: true
       });
       if (typeof window !== 'undefined') window.__evMapboxMap = map;
       map.addControl(new mapboxgl.NavigationControl(), 'top-right');
@@ -123,6 +127,8 @@
             map.on('moveend', function () {
               if (_ignoreNextMoveEnd) _ignoreNextMoveEnd = false;
               else userHasPannedMap = true;
+              if (markers.navCar) setCarMarkerRotation(markers.navCar, lastCarTurnOffset);
+              if (markers.demoCar) setCarMarkerRotation(markers.demoCar, lastCarTurnOffset);
             });
           }
           onLoaded();
@@ -309,18 +315,30 @@
     return Math.max(0.5, Math.min(1.8, 0.5 + (zoom - 6) * 0.08));
   }
 
-  var FIXED_CAR_MARKER_SIZE_PX = 36;
+  /** Car marker size in px so it scales with zoom: larger when zoomed in, smaller when zoomed out (real-world relative size). */
+  function carMarkerSizeFromZoom(zoom) {
+    if (zoom == null || typeof zoom !== 'number') return 32;
+    var refZoom = 16;
+    var basePx = 28;
+    var size = basePx * Math.pow(1.45, zoom - refZoom);
+    return Math.round(Math.max(14, Math.min(120, size)));
+  }
 
   function updateCarMarkerSizes() {
     if (!map) return;
-    var size = FIXED_CAR_MARKER_SIZE_PX;
+    var zoom = typeof map.getZoom === 'function' ? map.getZoom() : 16;
+    var size = carMarkerSizeFromZoom(zoom);
+    var mapBearing = typeof map.getBearing === 'function' ? map.getBearing() : 0;
+    var rotation = lastCarTurnOffset - mapBearing;
     [markers.navCar, markers.demoCar].forEach(function (m) {
       if (m && m.getElement) {
         var el = m.getElement();
         if (el) {
           el.style.width = size + 'px';
           el.style.height = size + 'px';
-          el.style.transform = 'rotate(' + lastCarTurnOffset + 'deg)';
+          el.style.minWidth = size + 'px';
+          el.style.minHeight = size + 'px';
+          el.style.transform = 'perspective(320px) rotateX(12deg) rotate(' + rotation + 'deg)';
         }
       }
     });
@@ -603,7 +621,9 @@
     lastCarTurnOffset = turnOffsetDeg != null ? turnOffsetDeg : 0;
     var el = marker.getElement();
     if (!el) return;
-    el.style.transform = 'rotate(' + lastCarTurnOffset + 'deg)';
+    var mapBearing = map && typeof map.getBearing === 'function' ? map.getBearing() : 0;
+    var rotation = lastCarTurnOffset - mapBearing;
+    el.style.transform = 'perspective(320px) rotateX(12deg) rotate(' + rotation + 'deg)';
   }
 
   var userHasPannedMap = false;
@@ -663,14 +683,11 @@
     map.flyTo(flyOpts);
   }
 
+  var CAR_ICON_URL = 'assets/car-icon.png';
   function createCarMarkerElement(className) {
     var wrap = document.createElement('div');
     wrap.className = className;
     wrap.style.transformOrigin = 'center center';
-    wrap.style.width = FIXED_CAR_MARKER_SIZE_PX + 'px';
-    wrap.style.height = FIXED_CAR_MARKER_SIZE_PX + 'px';
-    wrap.style.minWidth = FIXED_CAR_MARKER_SIZE_PX + 'px';
-    wrap.style.minHeight = FIXED_CAR_MARKER_SIZE_PX + 'px';
     wrap.style.visibility = 'visible';
     wrap.style.pointerEvents = 'none';
     var ripples = document.createElement('div');
@@ -682,9 +699,12 @@
       ripples.appendChild(ring);
     }
     wrap.appendChild(ripples);
-    var dot = document.createElement('div');
-    dot.className = 'car-marker-dot';
-    wrap.appendChild(dot);
+    var carImg = document.createElement('img');
+    carImg.className = 'car-marker-icon';
+    carImg.src = CAR_ICON_URL;
+    carImg.alt = '';
+    carImg.setAttribute('draggable', 'false');
+    wrap.appendChild(carImg);
     return wrap;
   }
 
@@ -693,46 +713,21 @@
     var mapboxgl = global.mapboxgl || (typeof window !== 'undefined' && window.mapboxgl);
     if (!mapboxgl) return;
     if (typeof lng !== 'number' || typeof lat !== 'number' || isNaN(lng) || isNaN(lat)) return;
-    if (lng === 0 && lat === 0) return;
     if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
+    lastCarTurnOffset = turnOffsetDeg != null ? turnOffsetDeg : lastCarTurnOffset;
+    lastNavCarLng = lng;
+    lastNavCarLat = lat;
     if (!markers.navCar) {
       const wrap = createCarMarkerElement('nav-car-marker');
       markers.navCar = new mapboxgl.Marker({ element: wrap, anchor: 'center' })
         .setLngLat([lng, lat])
         .addTo(map);
-      lastNavCarLng = lng;
-      lastNavCarLat = lat;
       setCarMarkerRotation(markers.navCar, turnOffsetDeg);
       updateCarMarkerSizes();
       return;
     }
-    if (navCarTweenId != null) {
-      cancelAnimationFrame(navCarTweenId);
-      navCarTweenId = null;
-    }
-    var fromLng = lastNavCarLng != null ? lastNavCarLng : lng;
-    var fromLat = lastNavCarLat != null ? lastNavCarLat : lat;
-    lastNavCarLng = lng;
-    lastNavCarLat = lat;
-    var startTime = null;
-    var durationMs = 180;
-    function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
-    function tween(now) {
-      if (startTime == null) startTime = now;
-      var elapsed = now - startTime;
-      var t = Math.min(1, elapsed / durationMs);
-      var eased = easeOutCubic(t);
-      var x = fromLng + (lng - fromLng) * eased;
-      var y = fromLat + (lat - fromLat) * eased;
-      markers.navCar.setLngLat([x, y]);
-      setCarMarkerRotation(markers.navCar, turnOffsetDeg != null ? turnOffsetDeg : lastCarTurnOffset);
-      if (t < 1) {
-        navCarTweenId = requestAnimationFrame(tween);
-      } else {
-        navCarTweenId = null;
-      }
-    }
-    navCarTweenId = requestAnimationFrame(tween);
+    markers.navCar.setLngLat([lng, lat]);
+    setCarMarkerRotation(markers.navCar, lastCarTurnOffset);
     updateCarMarkerSizes();
   }
 
@@ -778,18 +773,26 @@
     var mapboxgl = global.mapboxgl || (typeof window !== 'undefined' && window.mapboxgl);
     if (!map || !mapboxgl) return;
     if (typeof lng !== 'number' || typeof lat !== 'number' || isNaN(lng) || isNaN(lat)) return;
+    lastCarTurnOffset = turnOffsetDeg != null ? turnOffsetDeg : lastCarTurnOffset;
+    lastDemoCarLng = lng;
+    lastDemoCarLat = lat;
     if (!markers.demoCar) {
       const el = createCarMarkerElement('demo-car-marker');
       markers.demoCar = new mapboxgl.Marker({ element: el, anchor: 'center' })
         .setLngLat([lng, lat])
         .addTo(map);
+      setCarMarkerRotation(markers.demoCar, turnOffsetDeg);
+      updateCarMarkerSizes();
+      return;
     }
     markers.demoCar.setLngLat([lng, lat]);
-    setCarMarkerRotation(markers.demoCar, turnOffsetDeg);
+    setCarMarkerRotation(markers.demoCar, lastCarTurnOffset);
     updateCarMarkerSizes();
   }
 
   function removeDemoCar() {
+    lastDemoCarLng = null;
+    lastDemoCarLat = null;
     if (markers.demoCar) {
       markers.demoCar.remove();
       markers.demoCar = null;

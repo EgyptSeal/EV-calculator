@@ -31,32 +31,36 @@
       distanceMi: distanceKm / (C?.routing?.miToKm || 1.60934),
     };
     const legs = route.legs;
-    if (legs && legs.length && legs[0].steps && legs[0].steps.length) {
-      const steps = legs[0].steps;
+    if (legs && legs.length) {
       const cumulativeStepDistanceM = [0];
       const maneuvers = [];
-      for (let i = 0; i < steps.length; i++) {
-        const step = steps[i];
-        const d = step.distance != null ? step.distance : 0;
-        cumulativeStepDistanceM.push(cumulativeStepDistanceM[cumulativeStepDistanceM.length - 1] + d);
-        const banner = step.banner_instructions && step.banner_instructions[0];
-        const primary = banner && banner.primary ? banner.primary : null;
-        const secondary = banner && banner.secondary ? banner.secondary : null;
-        const sub = banner && banner.sub ? banner.sub : null;
-        const text = primary && primary.text != null ? primary.text : (step.maneuver && step.maneuver.instruction ? step.maneuver.instruction : '');
-        const type = (primary && primary.type) || (step.maneuver && step.maneuver.type) || 'turn';
-        const modifier = (primary && primary.modifier) || (step.maneuver && step.maneuver.modifier) || 'straight';
-        maneuvers.push({
-          primaryText: text,
-          type: type,
-          modifier: modifier,
-          secondaryText: secondary && secondary.text != null ? secondary.text : null,
-          subText: sub && sub.text != null ? sub.text : null,
-          distanceM: d,
-        });
+      for (let legIdx = 0; legIdx < legs.length; legIdx++) {
+        const steps = legs[legIdx].steps;
+        if (!steps || !steps.length) continue;
+        for (let i = 0; i < steps.length; i++) {
+          const step = steps[i];
+          const d = step.distance != null ? step.distance : 0;
+          cumulativeStepDistanceM.push(cumulativeStepDistanceM[cumulativeStepDistanceM.length - 1] + d);
+          const banner = step.banner_instructions && step.banner_instructions[0];
+          const primary = banner && banner.primary ? banner.primary : null;
+          const secondary = banner && banner.secondary ? banner.secondary : null;
+          const sub = banner && banner.sub ? banner.sub : null;
+          const text = primary && primary.text != null ? primary.text : (step.maneuver && step.maneuver.instruction ? step.maneuver.instruction : '');
+          const type = (primary && primary.type) || (step.maneuver && step.maneuver.type) || 'turn';
+          const modifier = (primary && primary.modifier) || (step.maneuver && step.maneuver.modifier) || 'straight';
+          maneuvers.push({
+            primaryText: text,
+            type: type,
+            modifier: modifier,
+            secondaryText: secondary && secondary.text != null ? secondary.text : null,
+            subText: sub && sub.text != null ? sub.text : null,
+            distanceM: d,
+          });
+        }
       }
-      out.maneuvers = maneuvers;
-      out.cumulativeStepDistanceM = cumulativeStepDistanceM;
+      if (maneuvers.length) {
+        out.maneuvers = maneuvers;
+        out.cumulativeStepDistanceM = cumulativeStepDistanceM;
       const segDistKm = [0];
       for (let i = 1; i < coordinates.length; i++) {
         const a = coordinates[i - 1];
@@ -81,6 +85,7 @@
       }
       out.stepIndexForSegment = stepIndexForSegment;
       out.segmentDistanceKm = segDistKm;
+      }
     }
     return out;
   }

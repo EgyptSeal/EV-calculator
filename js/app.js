@@ -37,6 +37,10 @@
     navigationActive: false,
     watchId: null,
     speedWatchId: null,
+    driverBehavior: { recentSpeeds: [], timestamps: [] },
+    driverBehaviorScore: 0.5,
+    liveConsumptionBias: 1.0,
+    smoothedArrivalBatteryPct: null,
   };
 
   function formatDuration(minutes) {
@@ -64,6 +68,8 @@
       luggageKg: state.luggageKg != null ? state.luggageKg : 0,
       maxSpeedKmh: state.maxSpeedKmh != null ? state.maxSpeedKmh : 120,
       ambientTempC: state.ambientTempC != null ? state.ambientTempC : 25,
+      drivingStyleScore: state.driverBehaviorScore != null ? state.driverBehaviorScore : 0.5,
+      liveConsumptionBias: state.liveConsumptionBias != null && state.liveConsumptionBias > 0 ? state.liveConsumptionBias : 1.0,
     };
     if (state.weather) {
       opts.windSpeedKmh = state.weather.wind_speed_10m;
@@ -75,6 +81,54 @@
       opts.averageSpeedKmh = state.route.distanceKm / (state.route.durationMin / 60);
     }
     return opts;
+  }
+
+  function updateDriverBehaviorFromSpeed(speedKmh) {
+    if (speedKmh == null || typeof speedKmh !== 'number' || speedKmh < 0) return;
+    var now = Date.now();
+    var maxAgeMs = 5 * 60 * 1000;
+    if (!state.driverBehavior) state.driverBehavior = { recentSpeeds: [], timestamps: [] };
+    state.driverBehavior.recentSpeeds.push(speedKmh);
+    state.driverBehavior.timestamps.push(now);
+    while (state.driverBehavior.timestamps.length > 0 && now - state.driverBehavior.timestamps[0] > maxAgeMs) {
+      state.driverBehavior.recentSpeeds.shift();
+      state.driverBehavior.timestamps.shift();
+    }
+    var arr = state.driverBehavior.recentSpeeds;
+    if (arr.length < 3) { state.driverBehaviorScore = 0.5; return; }
+    var sum = 0, count = 0, over100 = 0;
+    for (var i = 0; i < arr.length; i++) { sum += arr[i]; count++; if (arr[i] > 100) over100++; }
+    var avg = sum / count;
+    var pctHigh = count > 0 ? over100 / count : 0;
+    var planned = state.maxSpeedKmh != null ? state.maxSpeedKmh : 120;
+    var score = 0.5;
+    if (avg > planned * 0.95 && pctHigh > 0.3) score = 0.5 + 0.35 * pctHigh + 0.15 * Math.min(1, (avg - 90) / 50);
+    else if (avg < 60 && pctHigh < 0.1) score = 0.35;
+    else if (avg > 100) score = 0.5 + 0.2 * Math.min(1, (avg - 100) / 30) + 0.2 * pctHigh;
+    state.driverBehaviorScore = Math.max(0, Math.min(1, score));
+  }
+
+  function smoothArrivalBattery(rawPredictedEnd, options) {
+    var alpha = (options && options.arrival_soc_smoothing_factor != null) ? options.arrival_soc_smoothing_factor : (window.ENERGY_MODEL_TUNING && window.ENERGY_MODEL_TUNING.arrival_soc_smoothing_factor) || 0.18;
+    if (state.smoothedArrivalBatteryPct == null) state.smoothedArrivalBatteryPct = rawPredictedEnd;
+    else state.smoothedArrivalBatteryPct = alpha * rawPredictedEnd + (1 - alpha) * state.smoothedArrivalBatteryPct;
+    return Math.round(state.smoothedArrivalBatteryPct);
+  }
+
+  /** Call when you have actual vs predicted consumption over the same distance to adapt future estimates. */
+  function updateLiveConsumptionBias(actualKwhUsed, predictedKwhUsed) {
+    if (predictedKwhUsed <= 0 || actualKwhUsed < 0) return;
+    var t = window.ENERGY_MODEL_TUNING || {};
+    var minSamples = t.live_adaptation_min_samples != null ? t.live_adaptation_min_samples : 2;
+    if (!state._navConsumptionSamples) state._navConsumptionSamples = [];
+    state._navConsumptionSamples.push({ actual: actualKwhUsed, predicted: predictedKwhUsed });
+    if (state._navConsumptionSamples.length < minSamples) return;
+    var actual = 0, predicted = 0;
+    state._navConsumptionSamples.forEach(function (s) { actual += s.actual; predicted += s.predicted; });
+    if (predicted <= 0) return;
+    var ratio = actual / predicted;
+    var strength = t.live_adaptation_strength != null ? t.live_adaptation_strength : 0.12;
+    state.liveConsumptionBias = (1 - strength) * (state.liveConsumptionBias || 1) + strength * ratio;
   }
 
   function updateTipsContent() {
@@ -434,6 +488,8 @@
     return (m / 1000).toFixed(1).replace(/\.0$/, '') + ' km';
   }
 
+  var _lastNavInstructionMainText = '';
+  var _lastNavInstructionSeg = -1;
   function updateNavInstructionBox(opts) {
     var wrap = document.getElementById('navInstructionBoxWrap');
     var box = document.getElementById('navInstructionBox');
@@ -445,15 +501,21 @@
     if (!wrap || !box) return;
     if (!opts || opts.hide) {
       wrap.style.display = 'none';
+      var nextWrapHide = document.getElementById('navInstructionNext');
+      if (nextWrapHide) nextWrapHide.style.display = 'none';
+      _lastNavInstructionMainText = '';
+      _lastNavInstructionSeg = -1;
       return;
     }
     wrap.style.display = 'flex';
-    var mainText = opts.mainText || 'Continue straight';
-    var streetText = opts.streetText || '';
+    var mainText = (opts.mainText || 'Continue straight').trim();
+    var streetText = (opts.streetText || '').trim();
     var distanceM = opts.distanceM != null ? opts.distanceM : opts.distanceRemainingM;
-    var nextText = opts.nextText || '';
+    var nextText = (opts.nextText || '').trim();
     var type = opts.type || 'continue';
     var modifier = opts.modifier || 'straight';
+    var seg = opts.segmentIndex != null ? opts.segmentIndex : -1;
+    var mainChanged = mainText !== _lastNavInstructionMainText || seg !== _lastNavInstructionSeg;
     if (iconEl) iconEl.innerHTML = getManeuverSvg(type, modifier);
     if (mainEl) mainEl.textContent = mainText;
     if (streetEl) { streetEl.textContent = streetText; streetEl.style.display = streetText ? '' : 'none'; }
@@ -463,9 +525,29 @@
       distEl.classList.toggle('now', distStr === 'NOW');
     }
     if (nextEl) nextEl.textContent = nextText || '—';
-    box.classList.remove('animate-in');
-    void box.offsetWidth;
-    box.classList.add('animate-in');
+    var distRemM = opts.distanceRemainingM != null ? opts.distanceRemainingM : (opts.distanceM != null ? opts.distanceM : 999);
+    var showNext = distRemM <= 500 && (nextText || opts.nextText);
+    var nextWrap = document.getElementById('navInstructionNext');
+    if (nextWrap) {
+      if (showNext) {
+        nextWrap.classList.remove('nav-next-pop-out');
+        nextWrap.classList.add('nav-next-pop-in');
+        nextWrap.style.display = '';
+      } else {
+        nextWrap.classList.remove('nav-next-pop-in');
+        nextWrap.classList.add('nav-next-pop-out');
+        setTimeout(function () {
+          if (nextWrap.classList.contains('nav-next-pop-out')) nextWrap.style.display = 'none';
+        }, 220);
+      }
+    }
+    if (mainChanged) {
+      _lastNavInstructionMainText = mainText;
+      _lastNavInstructionSeg = seg;
+      box.classList.remove('animate-in');
+      void box.offsetWidth;
+      box.classList.add('animate-in');
+    }
   }
 
   var navAttachedLoaded = false;
@@ -781,6 +863,7 @@
     setupBottomControls();
     setupThemeToggle();
     setupDemo();
+    setupDevTuningPanel();
     applyTripToUI();
     Data.ready.then(function (ref) {
       var chargers = (ref && ref.chargerDatabase && ref.chargerDatabase.chargers) || [];
@@ -1172,6 +1255,11 @@
       state.navPositionAlongRouteKm = 0;
       state.lastNavGpsPositionKm = 0;
       state.lastNavGpsTime = Date.now();
+      state.driverBehavior = { recentSpeeds: [], timestamps: [] };
+      state.driverBehaviorScore = 0.5;
+      state.liveConsumptionBias = 1.0;
+      state.smoothedArrivalBatteryPct = null;
+      state._navConsumptionSamples = [];
       updateNavButtons();
       if (MapModule.enterNavigationMode) MapModule.enterNavigationMode();
       var coords = state.route.coordinates;
@@ -1183,6 +1271,10 @@
         var turnOff = MapModule.getTurnOffsetFromRoute ? MapModule.getTurnOffsetFromRoute(coords, 0) : 0;
         if (MapModule.setNavigationCarPosition) MapModule.setNavigationCarPosition(coords[0][0], coords[0][1], bearing, turnOff);
       }
+      var lastNavMapUpdateTime = 0;
+      var lastNavInstructionBoxUpdateTime = 0;
+      var NAV_MAP_UPDATE_INTERVAL_MS = 180;
+      var NAV_INSTRUCTION_BOX_INTERVAL_MS = 200;
       if (state.navSmoothIntervalId) clearInterval(state.navSmoothIntervalId);
       state.navSmoothIntervalId = setInterval(function () {
         if (!state.navigationActive || !state.route || !state.route.coordinates) return;
@@ -1200,38 +1292,52 @@
         displayKm = Math.max(0, Math.min(totalKm, displayKm));
         state.navPositionAlongRouteKm = displayKm;
         var pt = Chargers.getPointAlongRoute && Chargers.getPointAlongRoute(routeCoords, displayKm);
-        if (!pt || pt.length < 2) return;
+        if (!pt || pt.length < 2 || typeof pt[0] !== 'number' || typeof pt[1] !== 'number' || !Number.isFinite(pt[0]) || !Number.isFinite(pt[1])) return;
         var carLng = pt[0], carLat = pt[1];
         var seg = MapModule.getSegmentIndexFromRoute ? MapModule.getSegmentIndexFromRoute(routeCoords, carLng, carLat) : 0;
         var br = MapModule.getBearingFromRoute ? MapModule.getBearingFromRoute(routeCoords, carLng, carLat) : null;
         var turnOff = MapModule.getTurnOffsetFromRoute ? MapModule.getTurnOffsetFromRoute(routeCoords, seg) : 0;
-        if (MapModule.setNavigationCarPosition) MapModule.setNavigationCarPosition(carLng, carLat, br, turnOff);
-        var distTraveledM = displayKm * 1000;
-        var banner = (MapModule.getBannerInstruction && state.route && state.route.maneuvers) ? MapModule.getBannerInstruction(state.route, seg, distTraveledM) : null;
-        var t = banner && (banner.type || '').toLowerCase().replace(/_/g, ' ');
-        var mod = banner && (banner.modifier || '').toLowerCase().replace(/_/g, ' ');
-        var isStraightStep = t === 'depart' || (t === 'continue' && (mod === 'straight' || !mod));
-        if (banner && isStraightStep && MapModule.getUpcomingTurnBanner) {
-          var upcoming = MapModule.getUpcomingTurnBanner(state.route, seg, distTraveledM);
-          if (upcoming && upcoming.distanceRemainingM >= 50 && upcoming.distanceRemainingM <= HINT_SHOW_UPCOMING_TURN_AHEAD_M) banner = upcoming;
+        if (now - lastNavMapUpdateTime >= NAV_MAP_UPDATE_INTERVAL_MS && Number.isFinite(carLng) && Number.isFinite(carLat)) {
+          lastNavMapUpdateTime = now;
+          if (MapModule.setNavigationCarPosition) MapModule.setNavigationCarPosition(carLng, carLat, br, turnOff);
+          if (MapModule.followCar) MapModule.followCar(carLng, carLat, br, undefined, speedKmh, {});
         }
-        var instr = MapModule.getNextTurnInstruction ? MapModule.getNextTurnInstruction(routeCoords, seg) : 'Keep straight';
-        if (banner) banner = correctBannerFromGeometry(banner, instr);
-        var nextPt = routeCoords[seg + 1];
-        var distM = nextPt ? Math.round(Chargers.haversineKm(carLat, carLng, nextPt[1], nextPt[0]) * 1000) : 0;
-        var nextM = MapModule.getUpcomingManeuvers ? MapModule.getUpcomingManeuvers(state.route, seg, 1)[0] : null;
-        var nextStr = '';
-        if (nextM && state.route.cumulativeStepDistanceM && state.route.stepIndexForSegment) {
-          var stepIdx = state.route.stepIndexForSegment[seg];
-          var nextStepStartM = state.route.cumulativeStepDistanceM[stepIdx + 1];
-          var dRem = nextStepStartM != null ? Math.max(0, nextStepStartM - distTraveledM) : null;
-          nextStr = (nextM.primaryText || 'Continue') + (dRem != null && dRem > 0 ? ' in ' + (dRem >= 1000 ? (dRem / 1000).toFixed(1) + ' km' : Math.round(dRem) + ' m') : '');
+        if (now - lastNavInstructionBoxUpdateTime >= NAV_INSTRUCTION_BOX_INTERVAL_MS) {
+          lastNavInstructionBoxUpdateTime = now;
+          var distTraveledM = displayKm * 1000;
+          var banner = (MapModule.getBannerInstruction && state.route.maneuvers) ? MapModule.getBannerInstruction(state.route, seg, distTraveledM) : null;
+          var t = banner && (banner.type || '').toLowerCase().replace(/_/g, ' ');
+          var mod = banner && (banner.modifier || '').toLowerCase().replace(/_/g, ' ');
+          var isStraightStep = t === 'depart' || (t === 'continue' && (mod === 'straight' || !mod));
+          if (banner && isStraightStep && MapModule.getUpcomingTurnBanner) {
+            var upcoming = MapModule.getUpcomingTurnBanner(state.route, seg, distTraveledM);
+            if (upcoming && upcoming.distanceRemainingM >= 50 && upcoming.distanceRemainingM <= HINT_SHOW_UPCOMING_TURN_AHEAD_M) banner = upcoming;
+          }
+          var instr = MapModule.getNextTurnInstruction ? MapModule.getNextTurnInstruction(routeCoords, seg) : 'Keep straight';
+          if (banner) banner = correctBannerFromGeometry(banner, instr);
+          var nextPt = routeCoords[seg + 1];
+          var distM = nextPt ? Math.round(Chargers.haversineKm(carLat, carLng, nextPt[1], nextPt[0]) * 1000) : 0;
+          var remM = banner && banner.distanceRemainingM != null ? banner.distanceRemainingM : distM;
+          if (banner && (banner.type || '').toLowerCase() === 'arrive' && remM <= 25) {
+            if (!state._navArriveHideScheduled) {
+              state._navArriveHideScheduled = true;
+              setTimeout(function () {
+                if (state.navigationActive) updateNavInstructionBox({ hide: true });
+                state._navArriveHideScheduled = false;
+              }, 1200);
+            }
+          } else {
+            var nextM = MapModule.getUpcomingManeuvers ? MapModule.getUpcomingManeuvers(state.route, seg, 1)[0] : null;
+            var nextStr = '';
+            if (nextM && state.route.cumulativeStepDistanceM && state.route.stepIndexForSegment) {
+              var stepIdx = state.route.stepIndexForSegment[seg];
+              var nextStepStartM = state.route.cumulativeStepDistanceM[stepIdx + 1];
+              var dRem = nextStepStartM != null ? Math.max(0, nextStepStartM - distTraveledM) : null;
+              nextStr = (nextM.primaryText || 'Continue') + (dRem != null && dRem > 0 ? ' in ' + (dRem >= 1000 ? (dRem / 1000).toFixed(1) + ' km' : Math.round(dRem) + ' m') : '');
+            }
+            updateNavInstructionBox(banner ? { mainText: banner.primaryText || instr, streetText: [banner.secondaryText, banner.subText].filter(Boolean).join(' · ') || '', distanceRemainingM: banner.distanceRemainingM != null ? banner.distanceRemainingM : distM, type: banner.type, modifier: banner.modifier, nextText: nextStr, segmentIndex: seg } : { mainText: instr, distanceRemainingM: distM, nextText: nextStr, segmentIndex: seg });
+          }
         }
-        updateNavInstructionBox(banner ? { mainText: banner.primaryText || instr, streetText: [banner.secondaryText, banner.subText].filter(Boolean).join(' · ') || '', distanceRemainingM: banner.distanceRemainingM != null ? banner.distanceRemainingM : distM, type: banner.type, modifier: banner.modifier, nextText: nextStr } : { mainText: instr, distanceRemainingM: distM, nextText: nextStr });
-        if (MapModule.followCar) MapModule.followCar(carLng, carLat, br, undefined, speedKmh, {
-          distToTurnM: banner && banner.distanceRemainingM != null ? banner.distanceRemainingM : distM,
-          isTurnOrExit: banner ? isTurnOrExitFromBanner(banner) : !isContinueStraightInstruction(instr),
-        });
       }, 80);
       navigator.geolocation.getCurrentPosition(
         function (pos) {
@@ -1257,6 +1363,7 @@
           if (typeof lng !== 'number' || typeof lat !== 'number' || isNaN(lng) || isNaN(lat) || (lng === 0 && lat === 0) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
           var currentSpeedKmh = (pos.coords.speed != null && !isNaN(pos.coords.speed)) ? Math.round(pos.coords.speed * 3.6) : null;
           state.currentSpeedKmh = currentSpeedKmh != null ? currentSpeedKmh : state.maxSpeedKmh;
+          updateDriverBehaviorFromSpeed(state.currentSpeedKmh);
           var routeCoords = (state.route && state.route.coordinates && state.route.coordinates.length >= 2)
             ? state.route.coordinates
             : (state.route && state.route.geometry && state.route.geometry.coordinates && state.route.geometry.coordinates.length >= 2)
@@ -1270,6 +1377,30 @@
             state.lastNavGpsTime = Date.now();
           }
           updateSpeedSign(pos.coords.speed, state.maxSpeedKmh);
+          var distTraveledM = (projected ? projected.distanceAlongKm : Chargers.distanceAlongRouteToPointKm(routeCoords, lng, lat)) * 1000;
+          var carLng = projected ? projected.lng : lng, carLat = projected ? projected.lat : lat;
+          var seg = state.route && state.route.coordinates && MapModule.getSegmentIndexFromRoute ? MapModule.getSegmentIndexFromRoute(state.route.coordinates, carLng, carLat) : 0;
+          var banner = (MapModule.getBannerInstruction && state.route && state.route.maneuvers) ? MapModule.getBannerInstruction(state.route, seg, distTraveledM) : null;
+          var t = banner && (banner.type || '').toLowerCase().replace(/_/g, ' ');
+          var mod = banner && (banner.modifier || '').toLowerCase().replace(/_/g, ' ');
+          var isStraightStep = t === 'depart' || (t === 'continue' && (mod === 'straight' || !mod));
+          if (banner && isStraightStep && MapModule.getUpcomingTurnBanner) {
+            var upcoming = MapModule.getUpcomingTurnBanner(state.route, seg, distTraveledM);
+            if (upcoming && upcoming.distanceRemainingM >= 50 && upcoming.distanceRemainingM <= HINT_SHOW_UPCOMING_TURN_AHEAD_M) banner = upcoming;
+          }
+          var instr = MapModule.getNextTurnInstruction ? MapModule.getNextTurnInstruction(routeCoords, seg) : 'Keep straight';
+          if (banner) banner = correctBannerFromGeometry(banner, instr);
+          var nextPt = routeCoords[seg + 1];
+          var distM = nextPt ? Math.round(Chargers.haversineKm(carLat, carLng, nextPt[1], nextPt[0]) * 1000) : 0;
+          var nextM = MapModule.getUpcomingManeuvers ? MapModule.getUpcomingManeuvers(state.route, seg, 1)[0] : null;
+          var nextStr = '';
+          if (nextM && state.route.cumulativeStepDistanceM && state.route.stepIndexForSegment) {
+            var stepIdx = state.route.stepIndexForSegment[seg];
+            var nextStepStartM = state.route.cumulativeStepDistanceM[stepIdx + 1];
+            var dRem = nextStepStartM != null ? Math.max(0, nextStepStartM - distTraveledM) : null;
+            nextStr = (nextM.primaryText || 'Continue') + (dRem != null && dRem > 0 ? ' in ' + (dRem >= 1000 ? (dRem / 1000).toFixed(1) + ' km' : Math.round(dRem) + ' m') : '');
+          }
+          updateNavInstructionBox(banner ? { mainText: banner.primaryText || instr, streetText: [banner.secondaryText, banner.subText].filter(Boolean).join(' · ') || '', distanceRemainingM: banner.distanceRemainingM != null ? banner.distanceRemainingM : distM, type: banner.type, modifier: banner.modifier, nextText: nextStr, segmentIndex: seg } : { mainText: instr, distanceRemainingM: distM, nextText: nextStr, segmentIndex: seg });
           var v = state.vehicle;
           if (v) {
             var rawDistTraveledKm = projected ? projected.distanceAlongKm : Chargers.distanceAlongRouteToPointKm(routeCoords, lng, lat);
@@ -1289,11 +1420,19 @@
             lastNavUpdateTime = now;
             lastNavDistTraveledKm = Math.max(0, Math.min(state.route.distanceKm, rawDistTraveledKm));
             var distTraveledKm = lastNavDistTraveledKm;
-            var navState = Object.assign({}, state, { maxSpeedKmh: state.currentSpeedKmh, useInstantSpeed: true, routeDistanceKm: state.route.distanceKm });
+            var navState = Object.assign({}, state, {
+              maxSpeedKmh: state.currentSpeedKmh != null ? state.currentSpeedKmh : state.maxSpeedKmh,
+              actualSpeedKmh: state.currentSpeedKmh,
+              useInstantSpeed: true,
+              routeDistanceKm: state.route.distanceKm,
+              drivingStyleScore: state.driverBehaviorScore,
+              liveConsumptionBias: state.liveConsumptionBias,
+            });
             var consumedKwh = Trip.tripEnergyKwh(v, distTraveledKm, navState);
             var currentBattery = Math.max(0, state.startBattery - (consumedKwh / v.battery_kwh * 100));
             var remainingKm = Math.max(0, state.route.distanceKm - distTraveledKm);
-            var predictedEnd = Trip.batteryAtEnd(v, currentBattery, remainingKm, navState);
+            var predictedEndRaw = Trip.batteryAtEnd(v, currentBattery, remainingKm, navState);
+            var predictedEnd = smoothArrivalBattery(predictedEndRaw, window.ENERGY_MODEL_TUNING);
             var rangeKm = Trip.effectiveRangeKm(v, currentBattery, navState);
             state.startBattery = Math.round(currentBattery);
             var wpWithDist = (state.waypoints || []).map(function (wp) {
@@ -1309,7 +1448,7 @@
             UI.updateBottomBar({
               expectedRangeKm: rangeKm,
               nextStopKm: nextStopKm,
-              endEstPercent: Math.round(predictedEnd),
+              endEstPercent: predictedEnd,
               arrivalStr: arrivalStr,
             });
             var bar = document.getElementById('energyProgressWrap');
@@ -1328,7 +1467,7 @@
               });
               window.EVTripPlannerEnergyBar.updateBar(bar, {
                 currentBatteryPercent: state.startBattery,
-                predictedEndPercent: Math.round(predictedEnd),
+                predictedEndPercent: predictedEnd,
                 tripProgress: distTraveledKm / state.route.distanceKm,
                 chargeStops: cs,
                 zeroPointProgress: zeroPct,
@@ -1700,6 +1839,74 @@
     setTimeout(redrawRouteAndMarkers, 1200);
   }
 
+  var DEV_TUNING_DEFAULTS = {
+    base_calibration_factor: 0.97,
+    aerodynamic_speed_multiplier_90: 1.08,
+    aerodynamic_speed_multiplier_110: 1.22,
+    speed_curve_exponent: 1.65,
+    efficient_multiplier: 0.92,
+    normal_multiplier: 1.0,
+    dynamic_multiplier: 1.08,
+    aggressive_multiplier: 1.18,
+    aggressive_driving_penalty: 1.18,
+    city_efficiency_bonus: 0.95,
+    stop_go_penalty: 1.12,
+    highway_penalty_above_100: 1.15,
+    live_adaptation_strength: 0.12,
+    live_adaptation_min_samples: 2,
+    arrival_soc_smoothing_factor: 0.18,
+    speed_best_efficiency_kmh: 55,
+    speed_highway_threshold_kmh: 90,
+    speed_very_high_threshold_kmh: 110,
+  };
+
+  function setupDevTuningPanel() {
+    var toggle = document.getElementById('devTuningToggle');
+    var body = document.getElementById('devTuningBody');
+    var grid = document.getElementById('devTuningGrid');
+    var resetBtn = document.getElementById('devTuningReset');
+    if (!toggle || !body || !grid) return;
+    function render() {
+      grid.innerHTML = '';
+      var t = global.getEnergyModelTuning ? global.getEnergyModelTuning() : {};
+      var keys = Object.keys(DEV_TUNING_DEFAULTS);
+      keys.forEach(function (key) {
+        var label = document.createElement('label');
+        label.className = 'dev-tuning-label';
+        label.textContent = key.replace(/_/g, ' ');
+        var input = document.createElement('input');
+        input.type = 'number';
+        input.step = key.indexOf('factor') !== -1 || key.indexOf('multiplier') !== -1 || key.indexOf('penalty') !== -1 || key.indexOf('bonus') !== -1 ? 0.01 : 1;
+        input.min = key.indexOf('factor') !== -1 || key.indexOf('multiplier') !== -1 || key.indexOf('penalty') !== -1 || key.indexOf('bonus') !== -1 ? 0 : (key.indexOf('speed_') === 0 ? 20 : 0);
+        input.value = t[key] != null ? t[key] : '';
+        input.dataset.key = key;
+        input.addEventListener('change', function () {
+          var k = this.dataset.key;
+          var v = parseFloat(this.value);
+          if (!isNaN(v) && global.setEnergyModelTuning) global.setEnergyModelTuning(k, v);
+        });
+        var row = document.createElement('div');
+        row.className = 'dev-tuning-row';
+        row.appendChild(label);
+        row.appendChild(input);
+        grid.appendChild(row);
+      });
+    }
+    toggle.addEventListener('click', function () {
+      var open = body.style.display !== 'none';
+      body.style.display = open ? 'none' : 'block';
+      toggle.setAttribute('aria-expanded', open ? 'false' : 'true');
+      if (!open) render();
+    });
+    if (resetBtn) {
+      resetBtn.addEventListener('click', function () {
+        var set = global.setEnergyModelTuning;
+        if (set) Object.keys(DEV_TUNING_DEFAULTS).forEach(function (k) { set(k, DEV_TUNING_DEFAULTS[k]); });
+        render();
+      });
+    }
+  }
+
   function setupDemo() {
     var runBtn = document.getElementById('runDemoBtn');
     var stopBtn = document.getElementById('stopDemoBtn');
@@ -1770,6 +1977,7 @@
       demoPaused = false;
       demoManualDeltaKm = 0;
       demoManualOffsetM = 0;
+      state.smoothedArrivalBatteryPct = null;
       var lastDemoReroute = 0;
       var demoRerouteInProgress = false;
       var REROUTE_THRESHOLD_KM_DEMO = 0.01;
@@ -1780,6 +1988,8 @@
       demoPausedDuration = 0;
       demoStartBattery = state.startBattery;
       var lastDemoTickTime = Date.now();
+      var lastDemoInstructionTime = 0;
+      var DEMO_INSTRUCTION_THROTTLE_MS = 500;
       var lastDemoGpsTime = Date.now();
       var demoGpsReportedKm = 0;
       var demoDistanceTraveledKm = 0;
@@ -1852,21 +2062,6 @@
           if (nextPt && nextPt.length >= 2 && MapModule.bearingBetween) bearing = MapModule.bearingBetween(lng, lat, nextPt[0], nextPt[1]);
         }
         if (bearing == null && coords.length >= 2 && MapModule.bearingBetween) bearing = MapModule.bearingBetween(coords[0][0], coords[0][1], coords[1][0], coords[1][1]);
-        var simulatedGpsLng = lng;
-        var simulatedGpsLat = lat;
-        if (Chargers.projectOntoRoute && typeof Math.random === 'function') {
-          var noiseM = 3;
-          var angleRad = Math.random() * 2 * Math.PI;
-          var dLat = (noiseM / 111320) * Math.cos(angleRad);
-          var dLng = (noiseM / (111320 * Math.cos(lat * Math.PI / 180))) * Math.sin(angleRad);
-          simulatedGpsLng = lng + dLng;
-          simulatedGpsLat = lat + dLat;
-          var projected = Chargers.projectOntoRoute(coords, simulatedGpsLng, simulatedGpsLat);
-          if (projected) {
-            lng = projected.lng;
-            lat = projected.lat;
-          }
-        }
         var offset = offsetLatLngByMeters(lng, lat, bearing, demoManualOffsetM);
         lng = offset[0]; lat = offset[1];
         var seg = 0;
@@ -1940,19 +2135,31 @@
           var dRemD = nextStepStartMD != null ? Math.max(0, nextStepStartMD - demoDistTraveledM) : null;
           nextStrDemo = (nextMDemo.primaryText || 'Continue') + (dRemD != null && dRemD > 0 ? ' in ' + (dRemD >= 1000 ? (dRemD / 1000).toFixed(1) + ' km' : Math.round(dRemD) + ' m') : '');
         }
-        updateNavInstructionBox(banner ? { mainText: banner.primaryText || instr, streetText: [banner.secondaryText, banner.subText].filter(Boolean).join(' · ') || '', distanceRemainingM: banner.distanceRemainingM != null ? banner.distanceRemainingM : distM, type: banner.type, modifier: banner.modifier, nextText: nextStrDemo } : { mainText: instr, distanceRemainingM: distM, nextText: nextStrDemo });
+        if (now - lastDemoInstructionTime >= DEMO_INSTRUCTION_THROTTLE_MS) {
+          lastDemoInstructionTime = now;
+          updateNavInstructionBox(banner ? { mainText: banner.primaryText || instr, streetText: [banner.secondaryText, banner.subText].filter(Boolean).join(' · ') || '', distanceRemainingM: banner.distanceRemainingM != null ? banner.distanceRemainingM : distM, type: banner.type, modifier: banner.modifier, nextText: nextStrDemo, segmentIndex: seg } : { mainText: instr, distanceRemainingM: distM, nextText: nextStrDemo, segmentIndex: seg });
+        }
         if (MapModule.followCar) MapModule.followCar(lng, lat, bearing, true, demoCurrentCarSpeedKmh, {
           distToTurnM: banner && banner.distanceRemainingM != null ? banner.distanceRemainingM : distM,
           isTurnOrExit: banner ? isTurnOrExitFromBanner(banner) : !isContinueStraightInstruction(instr),
         });
         updateSpeedSign(demoCurrentCarSpeedKmh / 3.6, state.maxSpeedKmh);
-        var demoState = Object.assign({}, state, { maxSpeedKmh: demoCurrentCarSpeedKmh, useInstantSpeed: true, routeDistanceKm: totalDist });
+        updateDriverBehaviorFromSpeed(demoCurrentCarSpeedKmh);
+        var demoState = Object.assign({}, state, {
+          maxSpeedKmh: demoCurrentCarSpeedKmh,
+          actualSpeedKmh: demoCurrentCarSpeedKmh,
+          useInstantSpeed: true,
+          routeDistanceKm: totalDist,
+          drivingStyleScore: state.driverBehaviorScore,
+          liveConsumptionBias: state.liveConsumptionBias,
+        });
         var consumptionKwhPerKm = v ? Trip.consumptionPerKm(v, demoState) : 0.2;
         var batteryUsedKwh = effectiveKm * consumptionKwhPerKm;
         var batteryPercent = Math.max(0, demoStartBattery - (batteryUsedKwh / (v ? v.battery_kwh : 60) * 100));
         state.startBattery = Math.round(batteryPercent);
         var remainingKm = totalDist - effectiveKm;
-        var predictedEndPct = v ? Trip.batteryAtEnd(v, state.startBattery, remainingKm, demoState) : 0;
+        var predictedEndPctRaw = v ? Trip.batteryAtEnd(v, state.startBattery, remainingKm, demoState) : 0;
+        var predictedEndPct = smoothArrivalBattery(predictedEndPctRaw, window.ENERGY_MODEL_TUNING);
         var rangeKmDemo = v ? Trip.effectiveRangeKm(v, state.startBattery, demoState) : Math.round((batteryPercent / 100) * 300);
         var wpWithDist = [];
         var cs = [];
@@ -1978,12 +2185,12 @@
           weatherLabel: state.weather ? Weather.weatherCodeToLabel(state.weather.weather_code) : null,
           weatherHumidity: state.weather && state.weather.relative_humidity_2m != null ? Math.round(state.weather.relative_humidity_2m) : null,
           weatherWind: state.weather && state.weather.wind_speed_10m != null ? Math.round(state.weather.wind_speed_10m) : null,
-          endEstPercent: Math.round(predictedEndPct),
+          endEstPercent: predictedEndPct,
         });
         var bar = document.getElementById('energyProgressWrap');
         if (bar && window.EVTripPlannerEnergyBar) {
           var zeroPct = v ? Trip.zeroPointProgress(v, state.startBattery, totalDist, wpWithDist, demoState) : 100;
-          window.EVTripPlannerEnergyBar.updateBar(bar, { currentBatteryPercent: state.startBattery, predictedEndPercent: Math.round(predictedEndPct), tripProgress: effectiveKm / totalDist, chargeStops: cs, zeroPointProgress: zeroPct, routeDistanceKm: totalDist });
+          window.EVTripPlannerEnergyBar.updateBar(bar, { currentBatteryPercent: state.startBattery, predictedEndPercent: predictedEndPct, tripProgress: effectiveKm / totalDist, chargeStops: cs, zeroPointProgress: zeroPct, routeDistanceKm: totalDist });
         }
         demoAnimationId = requestAnimationFrame(tick);
       }

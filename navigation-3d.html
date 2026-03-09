@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>3D Car Navigation – Mapbox + Three.js</title>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.19.0/mapbox-gl.css" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 0; font-family: system-ui, sans-serif; }
+    #map { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+    #hud {
+      position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.75); color: #fff; padding: 10px 16px; border-radius: 8px;
+      font-size: 12px; white-space: nowrap; pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="hud">Car: --  Bearing: --  (GPS simulation)</div>
+
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.19.0/mapbox-gl.js"></script>
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+  <script src="https://unpkg.com/three@0.160.0/examples/js/loaders/GLTFLoader.js"></script>
+
+  <script>
+(function () {
+  'use strict';
+
+  // ========== CONFIG – set your token or use project config ==========
+  var MAPBOX_TOKEN = (typeof EVTripPlannerConfig !== 'undefined' && EVTripPlannerConfig.mapbox && EVTripPlannerConfig.mapbox.accessToken)
+    ? EVTripPlannerConfig.mapbox.accessToken
+    : 'pk.eyJ1IjoiaG9zc2FtaGVnYXppODUiLCJhIjoiY21tN3YxMGFtMHJqcTJwcjFjejMxM2RzZCJ9.vpxr16H3Rj31KkVQ6l3kFw';
+  var CAR_GLB_URL = 'assets/byd_sealion_7_ultra_2026.glb';
+
+  // Camera (navigation view)
+  var CAMERA_PITCH = 60;
+  var CAMERA_ZOOM = 18;
+  var CAR_ALTITUDE = 0;
+  var CAR_MODEL_SCALE = 1;
+  var LERP_SPEED = 4;
+  var BEARING_LERP_SPEED = 6;
+
+  // Car state (smoothed)
+  var carLng = 31.2357;
+  var carLat = 30.0444;
+  var carBearing = 0;
+  var targetLng = carLng;
+  var targetLat = carLat;
+  var targetBearing = carBearing;
+
+  // GPS simulation waypoints [lng, lat, bearing]
+  var SIM_PATH = [
+    [31.2357, 30.0444, 0],
+    [31.2365, 30.0448, 45],
+    [31.2372, 30.0455, 50],
+    [31.2380, 30.0462, 55],
+    [31.2388, 30.0468, 40],
+    [31.2395, 30.0472, 30],
+    [31.2402, 30.0475, 20],
+    [31.2410, 30.0478, 15],
+    [31.2418, 30.0480, 10],
+    [31.2425, 30.0482, 5]
+  ];
+  var simIndex = 0;
+  var simInterval = 3000;
+
+  function lerp(a, b, t) {
+    return a + (b - a) * Math.min(1, t);
+  }
+
+  function normalizeAngle(deg) {
+    while (deg > 180) deg -= 360;
+    while (deg < -180) deg += 360;
+    return deg;
+  }
+
+  mapboxgl.accessToken = MAPBOX_TOKEN;
+  var map = new mapboxgl.Map({
+    container: 'map',
+    style: 'mapbox://styles/mapbox/standard',
+    center: [carLng, carLat],
+    zoom: CAMERA_ZOOM,
+    pitch: CAMERA_PITCH,
+    bearing: carBearing,
+    antialias: true
+  });
+
+  var customLayer = {
+    id: 'car-3d-layer',
+    type: 'custom',
+    renderingMode: '3d',
+    carGroup: null,
+    onAdd: function (map, gl) {
+      var THREE = window.THREE;
+      this.camera = new THREE.Camera();
+      this.scene = new THREE.Scene();
+      this.map = map;
+
+      var dirLight1 = new THREE.DirectionalLight(0xffffff, 1);
+      dirLight1.position.set(0, -70, 100).normalize();
+      this.scene.add(dirLight1);
+      var dirLight2 = new THREE.DirectionalLight(0xffffff, 0.8);
+      dirLight2.position.set(0, 70, 100).normalize();
+      this.scene.add(dirLight2);
+      var ambient = new THREE.AmbientLight(0xffffff, 0.4);
+      this.scene.add(ambient);
+
+      var loader = new THREE.GLTFLoader();
+      var self = this;
+      loader.load(CAR_GLB_URL, function (gltf) {
+        var root = gltf.scene;
+        root.rotation.x = Math.PI / 2;
+        root.rotation.y = 0;
+        root.rotation.z = 0;
+        root.scale.setScalar(CAR_MODEL_SCALE);
+        self.carGroup = root;
+        self.scene.add(root);
+      }, undefined, function (err) {
+        console.error('GLB load error:', err);
+      });
+
+      this.renderer = new THREE.WebGLRenderer({ canvas: map.getCanvas(), context: gl, antialias: true });
+      this.renderer.autoClear = false;
+    },
+    render: function (gl, matrix) {
+      var dt = 0.016;
+      carLng = lerp(carLng, targetLng, LERP_SPEED * dt);
+      carLat = lerp(carLat, targetLat, LERP_SPEED * dt);
+      var bearingDiff = normalizeAngle(targetBearing - carBearing);
+      carBearing = carBearing + bearingDiff * Math.min(1, BEARING_LERP_SPEED * dt);
+      carBearing = normalizeAngle(carBearing);
+
+      var merc = mapboxgl.MercatorCoordinate.fromLngLat([carLng, carLat], CAR_ALTITUDE);
+      var meter = merc.meterInMercatorCoordinateUnits();
+      var scale = meter * 1;
+
+      var THREE = window.THREE;
+      var bearingRad = (carBearing * Math.PI) / 180;
+      var rotX = new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+      var rotZ = new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(0, 0, 1), -bearingRad);
+      var modelTransform = new THREE.Matrix4()
+        .makeTranslation(merc.x, merc.y, merc.z)
+        .scale(new THREE.Vector3(scale, -scale, scale))
+        .multiply(rotX)
+        .multiply(rotZ);
+
+      var m = new THREE.Matrix4().fromArray(matrix);
+      this.camera.projectionMatrix = m.multiply(modelTransform);
+
+      if (this.carGroup) {
+        this.carGroup.rotation.z = -bearingRad;
+      }
+
+      this.renderer.resetState();
+      this.renderer.render(this.scene, this.camera);
+      this.map.triggerRepaint();
+    }
+  };
+
+  map.on('style.load', function () {
+    map.addLayer(customLayer);
+  });
+
+  function updateCamera() {
+    map.easeTo({
+      center: [carLng, carLat],
+      bearing: carBearing,
+      pitch: CAMERA_PITCH,
+      zoom: CAMERA_ZOOM,
+      duration: 800,
+      easing: function (t) { return t * (2 - t); }
+    });
+  }
+
+  function tick() {
+    updateCamera();
+    document.getElementById('hud').textContent =
+      'Car: ' + carLng.toFixed(5) + ', ' + carLat.toFixed(5) + '  Bearing: ' + Math.round(carBearing) + '°  (GPS simulation)';
+  }
+
+  setInterval(function () {
+    simIndex = (simIndex + 1) % SIM_PATH.length;
+    var w = SIM_PATH[simIndex];
+    targetLng = w[0];
+    targetLat = w[1];
+    targetBearing = w[2];
+    tick();
+  }, simInterval);
+
+  map.on('load', function () {
+    tick();
+  });
+
+  window.setCarPosition = function (lng, lat, bearing) {
+    targetLng = lng;
+    targetLat = lat;
+    targetBearing = bearing != null ? bearing : targetBearing;
+    tick();
+  };
+})();
+  </script>
+</body>
+</html>

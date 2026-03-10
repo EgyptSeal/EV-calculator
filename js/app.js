@@ -1253,8 +1253,9 @@
       if (MapModule.removeDemoCar) MapModule.removeDemoCar();
       state.navigationActive = true;
       state.navPositionAlongRouteKm = 0;
-      state.lastNavGpsPositionKm = 0;
-      state.lastNavGpsTime = Date.now();
+      state.lastNavGpsPositionKm = null;
+      state.lastNavGpsTime = null;
+      state.navDisplayKm = null;
       state.driverBehavior = { recentSpeeds: [], timestamps: [] };
       state.driverBehaviorScore = 0.5;
       state.liveConsumptionBias = 1.0;
@@ -1284,12 +1285,18 @@
           totalKm = 0;
           for (var i = 1; i < routeCoords.length; i++) totalKm += Chargers.haversineKm(routeCoords[i-1][1], routeCoords[i-1][0], routeCoords[i][1], routeCoords[i][0]);
         }
-        var speedKmh = state.currentSpeedKmh || 0;
-        var lastKm = state.lastNavGpsPositionKm != null ? state.lastNavGpsPositionKm : 0;
-        var lastT = state.lastNavGpsTime != null ? state.lastNavGpsTime : Date.now();
         var now = Date.now();
-        var displayKm = lastKm + (speedKmh / 3600) * ((now - lastT) / 1000);
-        displayKm = Math.max(0, Math.min(totalKm, displayKm));
+        var displayKm = state.navPositionAlongRouteKm;
+        if (state.lastNavGpsPositionKm != null) {
+          var targetKm = Math.max(0, Math.min(totalKm, state.lastNavGpsPositionKm));
+          if (state.navDisplayKm == null) state.navDisplayKm = targetKm;
+          var NAV_SMOOTH_LERP = 0.18;
+          state.navDisplayKm = state.navDisplayKm + (targetKm - state.navDisplayKm) * NAV_SMOOTH_LERP;
+          state.navDisplayKm = Math.max(0, Math.min(totalKm, state.navDisplayKm));
+          displayKm = state.navDisplayKm;
+        } else {
+          displayKm = 0;
+        }
         state.navPositionAlongRouteKm = displayKm;
         var pt = Chargers.getPointAlongRoute && Chargers.getPointAlongRoute(routeCoords, displayKm);
         if (!pt || pt.length < 2 || typeof pt[0] !== 'number' || typeof pt[1] !== 'number' || !Number.isFinite(pt[0]) || !Number.isFinite(pt[1])) return;
@@ -1297,10 +1304,10 @@
         var seg = MapModule.getSegmentIndexFromRoute ? MapModule.getSegmentIndexFromRoute(routeCoords, carLng, carLat) : 0;
         var br = MapModule.getBearingFromRoute ? MapModule.getBearingFromRoute(routeCoords, carLng, carLat) : null;
         var turnOff = MapModule.getTurnOffsetFromRoute ? MapModule.getTurnOffsetFromRoute(routeCoords, seg) : 0;
-        if (now - lastNavMapUpdateTime >= NAV_MAP_UPDATE_INTERVAL_MS && Number.isFinite(carLng) && Number.isFinite(carLat)) {
+        if (state.lastNavGpsPositionKm != null && now - lastNavMapUpdateTime >= NAV_MAP_UPDATE_INTERVAL_MS && Number.isFinite(carLng) && Number.isFinite(carLat)) {
           lastNavMapUpdateTime = now;
           if (MapModule.setNavigationCarPosition) MapModule.setNavigationCarPosition(carLng, carLat, br, turnOff);
-          if (MapModule.followCar) MapModule.followCar(carLng, carLat, br, undefined, speedKmh, {});
+          if (MapModule.followCar) MapModule.followCar(carLng, carLat, br, undefined, state.currentSpeedKmh || 0, {});
         }
         if (now - lastNavInstructionBoxUpdateTime >= NAV_INSTRUCTION_BOX_INTERVAL_MS) {
           lastNavInstructionBoxUpdateTime = now;
@@ -1343,9 +1350,11 @@
         function (pos) {
           var lng = pos.coords.longitude, lat = pos.coords.latitude;
           var proj = Chargers.projectOntoRoute && coords && Chargers.projectOntoRoute(coords, lng, lat);
-          if (proj) {
+          var ROUTE_SNAP_MARGIN_KM_INIT = 0.003;
+          if (proj && (proj.distanceFromRouteKm <= ROUTE_SNAP_MARGIN_KM_INIT || state.lastNavGpsPositionKm == null)) {
             state.lastNavGpsPositionKm = proj.distanceAlongKm;
             state.lastNavGpsTime = Date.now();
+            if (state.navDisplayKm == null) state.navDisplayKm = proj.distanceAlongKm;
           }
         },
         function () {},
@@ -1375,6 +1384,7 @@
           if (projected && (projected.distanceFromRouteKm <= ROUTE_SNAP_MARGIN_KM || state.lastNavGpsPositionKm == null)) {
             state.lastNavGpsPositionKm = projected.distanceAlongKm;
             state.lastNavGpsTime = Date.now();
+            if (state.navDisplayKm == null) state.navDisplayKm = projected.distanceAlongKm;
           }
           updateSpeedSign(pos.coords.speed, state.maxSpeedKmh);
           var distTraveledM = (projected ? projected.distanceAlongKm : Chargers.distanceAlongRouteToPointKm(routeCoords, lng, lat)) * 1000;

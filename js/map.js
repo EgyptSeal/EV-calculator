@@ -663,6 +663,16 @@
     userHasPannedMap = false;
   }
 
+  /** Re-lock camera on car (e.g. after user panned). Call during navigation. */
+  function recenterOnCar(speedKmh) {
+    if (!map || !navigationMode) return;
+    resetUserPannedMap();
+    var lng = lastNavCarLng, lat = lastNavCarLat;
+    if (typeof lng !== 'number' || typeof lat !== 'number' || isNaN(lng) || isNaN(lat)) return;
+    var bearing = map.getBearing();
+    followCar(lng, lat, bearing, true, speedKmh != null ? speedKmh : 0, {});
+  }
+
   function flyToCar(lng, lat, opts) {
     if (!map) return;
     opts = opts || {};
@@ -850,6 +860,7 @@
     setNavigationCarPosition,
     clearNavigationCar,
     resetUserPannedMap,
+    recenterOnCar,
     setTempSavePin,
     removeTempSavePin,
   };

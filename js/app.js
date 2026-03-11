@@ -1288,6 +1288,7 @@
       }
       showMapSection(true);
       setNavLayoutExpanded(true);
+      toggleDemoDrawer(false);
       var lastNavMapUpdateTime = 0;
       var lastNavInstructionBoxUpdateTime = 0;
       var lastRouteTrimTime = 0;
@@ -1298,7 +1299,11 @@
       if (state._navRafId) { cancelAnimationFrame(state._navRafId); state._navRafId = null; }
       var _navLastFrameTime = performance.now();
       function navSmoothFrame(timestamp) {
-        if (!state.navigationActive || !state.route || !state.route.coordinates) { state._navRafId = requestAnimationFrame(navSmoothFrame); return; }
+        try { _navSmoothFrameInner(timestamp); } catch (e) { console.warn('navSmoothFrame error:', e); }
+        if (state.navigationActive) state._navRafId = requestAnimationFrame(navSmoothFrame);
+      }
+      function _navSmoothFrameInner(timestamp) {
+        if (!state.navigationActive || !state.route || !state.route.coordinates) return;
         var routeCoords = state.route.coordinates;
         var totalKm = state.route.distanceKm;
         if (totalKm == null || totalKm <= 0) {
@@ -1327,7 +1332,7 @@
         }
         state.navPositionAlongRouteKm = displayKm;
         var pt = Chargers.getPointAlongRoute && Chargers.getPointAlongRoute(routeCoords, displayKm);
-        if (!pt || pt.length < 2 || typeof pt[0] !== 'number' || typeof pt[1] !== 'number' || !Number.isFinite(pt[0]) || !Number.isFinite(pt[1])) { state._navRafId = requestAnimationFrame(navSmoothFrame); return; }
+        if (!pt || pt.length < 2 || typeof pt[0] !== 'number' || typeof pt[1] !== 'number' || !Number.isFinite(pt[0]) || !Number.isFinite(pt[1])) return;
         var carLng = pt[0], carLat = pt[1];
         var seg = MapModule.getSegmentIndexFromRoute ? MapModule.getSegmentIndexFromRoute(routeCoords, carLng, carLat) : 0;
         var br = MapModule.getBearingFromRoute ? MapModule.getBearingFromRoute(routeCoords, carLng, carLat) : null;
@@ -1442,7 +1447,6 @@
             });
           }
         }
-        state._navRafId = requestAnimationFrame(navSmoothFrame);
       }
       state._navRafId = requestAnimationFrame(navSmoothFrame);
       navigator.geolocation.getCurrentPosition(
@@ -1549,7 +1553,7 @@
               var turnOff = MapModule.getTurnOffsetFromRoute ? MapModule.getTurnOffsetFromRoute(newRoute.coordinates, seg) : 0;
               if (MapModule.setNavigationCarPosition) MapModule.setNavigationCarPosition(lng, lat, br, turnOff);
               MapModule.setEndMarker(state.endCoords);
-              MapModule.setChargeStopMarkers(state.waypoints || []);
+              MapModule.setChargeStopMarkers(state.waypoints || [], onChargeStopRemoveClick);
               Data.ready.then(function (_ref) {
                 var chargerDatabase = _ref.chargerDatabase;
                 var chargers = (chargerDatabase && chargerDatabase.chargers) || [];
@@ -1605,6 +1609,10 @@
       if (!state.navigationActive || !MapModule.recenterOnCar) return;
       MapModule.recenterOnCar(state.currentSpeedKmh != null ? state.currentSpeedKmh : 0);
     });
+    var demoToggleBtn = document.getElementById('demoToggleBtn');
+    if (demoToggleBtn) demoToggleBtn.addEventListener('click', function () {
+      toggleDemoDrawer();
+    });
     document.getElementById('addStopBtn')?.addEventListener('click', () => {
       const list = document.getElementById('stopsList');
       if (!list) return;
@@ -1634,6 +1642,15 @@
     }
   }
 
+  function toggleDemoDrawer(forceOpen) {
+    var drawer = document.getElementById('demoDrawer');
+    if (!drawer) return;
+    var isOpen = drawer.classList.contains('open');
+    if (forceOpen === true) { drawer.classList.add('open'); return; }
+    if (forceOpen === false) { drawer.classList.remove('open'); return; }
+    drawer.classList.toggle('open');
+  }
+
   function doStopNavigation() {
     state.navigationActive = false;
     state.currentSpeedKmh = null;
@@ -1656,6 +1673,7 @@
     setNavLayoutExpanded(false);
     reapplyRouteAndMarkers();
     updateNavButtons();
+    toggleDemoDrawer(false);
   }
 
   function setNavLayoutExpanded(expanded) {
@@ -1753,7 +1771,7 @@
       state.waypoints = (state.waypoints || []).filter(function (w) {
         return !(Math.abs(w.lng - lng) < 1e-6 && Math.abs(w.lat - lat) < 1e-6);
       });
-      MapModule.setChargeStopMarkers(state.waypoints || []);
+      MapModule.setChargeStopMarkers(state.waypoints || [], onChargeStopRemoveClick);
       updateRouteFromCoords();
     });
   }
@@ -1860,8 +1878,12 @@
       if (charger) {
         state.waypoints = state.waypoints || [];
         state.waypoints.push({ lat: charger.lat, lng: charger.lng, chargeTo: percent, name: charger.name });
-        if (MapModule.setChargeStopMarkers) MapModule.setChargeStopMarkers(state.waypoints);
-        updateInfoRouteStatus();
+        if (MapModule.setChargeStopMarkers) MapModule.setChargeStopMarkers(state.waypoints, onChargeStopRemoveClick);
+        if (state.startCoords && state.endCoords) {
+          updateRouteFromCoords();
+        } else {
+          applyTripToUI();
+        }
       }
     });
   }
@@ -1873,7 +1895,7 @@
       MapModule.removeRouteLayer('ev-trip-route');
       Routing.drawRoute(MapModule, state.route);
     }
-    if (state.waypoints && state.waypoints.length) MapModule.setChargeStopMarkers(state.waypoints);
+    if (state.waypoints && state.waypoints.length) MapModule.setChargeStopMarkers(state.waypoints, onChargeStopRemoveClick);
     if (state.chargersNearRoute && state.chargersNearRoute.length) MapModule.addChargerMarkers(state.chargersNearRoute, onChargerPinClick);
   }
 
@@ -2185,7 +2207,7 @@
             state.route = newRoute;
             MapModule.removeRouteLayer('ev-trip-route');
             Routing.drawRoute(MapModule, newRoute);
-            MapModule.setChargeStopMarkers(state.waypoints || []);
+            MapModule.setChargeStopMarkers(state.waypoints || [], onChargeStopRemoveClick);
             demoStartTime = Date.now();
             demoPausedDuration = 0;
             demoManualDeltaKm = 0;

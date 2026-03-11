@@ -328,17 +328,16 @@
     if (!map) return;
     var zoom = typeof map.getZoom === 'function' ? map.getZoom() : 16;
     var size = carMarkerSizeFromZoom(zoom);
-    var mapBearing = typeof map.getBearing === 'function' ? map.getBearing() : 0;
-    var rotation = lastCarTurnOffset - mapBearing;
     [markers.navCar, markers.demoCar].forEach(function (m) {
       if (m && m.getElement) {
         var el = m.getElement();
-        if (el) {
-          el.style.width = size + 'px';
-          el.style.height = size + 'px';
-          el.style.minWidth = size + 'px';
-          el.style.minHeight = size + 'px';
-          el.style.transform = 'perspective(320px) rotateX(12deg) rotate(' + rotation + 'deg)';
+        if (!el) return;
+        el.style.width = size + 'px';
+        el.style.height = size + 'px';
+        var inner = el.querySelector('.car-marker-inner');
+        if (inner) {
+          inner.style.width = size + 'px';
+          inner.style.height = size + 'px';
         }
       }
     });
@@ -375,7 +374,12 @@
     labelEl.className = 'map-marker-label';
     labelEl.setAttribute('dir', 'auto');
     labelEl.textContent = label || (type === 'start' ? 'Starting' : type === 'end' ? 'End' : '');
-    labelEl.style.color = type === 'start' ? '#00ff88' : type === 'end' ? '#ff4757' : '#00d4ff';
+    labelEl.style.color = type === 'start' ? '#34d399' : type === 'end' ? '#f87171' : '#38bdf8';
+    labelEl.style.background = 'rgba(15, 23, 42, 0.85)';
+    labelEl.style.padding = '2px 8px';
+    labelEl.style.borderRadius = '6px';
+    labelEl.style.border = '1px solid rgba(255,255,255,0.1)';
+    labelEl.style.backdropFilter = 'blur(4px)';
 
     const el = document.createElement('div');
     el.className = 'map-marker map-marker-' + type;
@@ -421,9 +425,20 @@
     markers.end = addMarker('end', lngLat, 'End');
   }
 
-  function setChargeStopMarkers(waypoints) {
+  function setChargeStopMarkers(waypoints, onRemoveClick) {
     clearMarkers('chargeStops');
-    markers.chargeStops = (waypoints || []).map((wp) => addMarker('charger', [wp.lng, wp.lat], wp.name || 'Charge stop'));
+    markers.chargeStops = (waypoints || []).map((wp) => {
+      var m = addMarker('charger', [wp.lng, wp.lat], wp.name || 'Charge stop');
+      if (m && m.getElement()) {
+        m.getElement().style.cursor = 'pointer';
+        m.getElement().title = (wp.name || 'Charge stop') + ' – click to remove';
+        m.getElement().addEventListener('click', function (e) {
+          e.stopPropagation();
+          if (onRemoveClick) onRemoveClick(wp.lng, wp.lat);
+        });
+      }
+      return m;
+    });
   }
 
   function addChargerMarkers(chargers, onChargerClick) {
@@ -619,11 +634,6 @@
   function setCarMarkerRotation(marker, turnOffsetDeg) {
     if (!marker || !marker.getElement) return;
     lastCarTurnOffset = turnOffsetDeg != null ? turnOffsetDeg : 0;
-    var el = marker.getElement();
-    if (!el) return;
-    var mapBearing = map && typeof map.getBearing === 'function' ? map.getBearing() : 0;
-    var rotation = lastCarTurnOffset - mapBearing;
-    el.style.transform = 'perspective(320px) rotateX(12deg) rotate(' + rotation + 'deg)';
   }
 
   var userHasPannedMap = false;
@@ -693,13 +703,18 @@
     map.flyTo(flyOpts);
   }
 
-  var CAR_ICON_URL = 'assets/car-icon.png';
+  var CAR_ICON_URL = 'assets/car-icon.png?v=2';
   function createCarMarkerElement(className) {
     var wrap = document.createElement('div');
     wrap.className = className;
-    wrap.style.transformOrigin = 'center center';
-    wrap.style.visibility = 'visible';
     wrap.style.pointerEvents = 'none';
+    var inner = document.createElement('div');
+    inner.className = 'car-marker-inner';
+    inner.style.position = 'relative';
+    inner.style.display = 'flex';
+    inner.style.alignItems = 'center';
+    inner.style.justifyContent = 'center';
+    inner.style.transformOrigin = 'center center';
     var ripples = document.createElement('div');
     ripples.className = 'car-marker-ripples';
     for (var i = 0; i < 3; i++) {
@@ -708,13 +723,14 @@
       ring.style.animationDelay = (i * 0.6) + 's';
       ripples.appendChild(ring);
     }
-    wrap.appendChild(ripples);
+    inner.appendChild(ripples);
     var carImg = document.createElement('img');
     carImg.className = 'car-marker-icon';
     carImg.src = CAR_ICON_URL;
     carImg.alt = '';
     carImg.setAttribute('draggable', 'false');
-    wrap.appendChild(carImg);
+    inner.appendChild(carImg);
+    wrap.appendChild(inner);
     return wrap;
   }
 

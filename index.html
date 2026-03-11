@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>EV Trip Planner – Egypt</title>
   <link href="https://api.mapbox.com/mapbox-gl-js/v3.19.0/mapbox-gl.css" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/styles.css?v=12">
 </head>
 <body>
   <!-- Startup: Vehicle selection & trip setup modal -->
@@ -233,6 +233,40 @@
           </div>
           <button type="button" class="map-recenter-btn" id="mapRecenterBtn" title="Re-center map on car" style="display:none;">Re-Center</button>
         </div>
+        <button type="button" class="demo-toggle-btn" id="demoToggleBtn" title="Toggle demo simulation panel" onclick="var d=document.getElementById('demoDrawer');if(d)d.classList.toggle('open');">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          Demo
+        </button>
+        <div class="demo-drawer" id="demoDrawer">
+          <div class="demo-drawer-header">DEMO SIMULATION</div>
+          <div class="demo-controls" id="demoControlsSection">
+            <button type="button" class="btn btn-primary" id="runDemoBtn">Run Demo</button>
+            <button type="button" class="btn btn-secondary" id="stopDemoBtn" style="display:none;">Stop Demo</button>
+            <div class="demo-field">
+              <label>Car speed (km/h)</label>
+              <input type="range" id="demoCarSpeed" min="20" max="160" value="20">
+              <span id="demoCarSpeedVal">20</span>
+            </div>
+            <div class="demo-field">
+              <label>Simulation speed</label>
+              <input type="range" id="demoSimSpeed" min="1" max="20" value="1">
+              <span id="demoSimSpeedVal">1×</span>
+            </div>
+            <div class="demo-move-buttons" id="demoMoveButtons" style="display:none;">
+              <label>Move car</label>
+              <div class="demo-move-row">
+                <button type="button" class="btn btn-icon demo-move-btn" id="demoMoveForward" title="Forward">▲</button>
+              </div>
+              <div class="demo-move-row">
+                <button type="button" class="btn btn-icon demo-move-btn" id="demoMoveLeft" title="Left">◀</button>
+                <button type="button" class="btn btn-icon demo-move-btn" id="demoMoveRight" title="Right">▶</button>
+              </div>
+              <div class="demo-move-row">
+                <button type="button" class="btn btn-icon demo-move-btn" id="demoMoveBackward" title="Backward">▼</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <aside class="right-sidebar right-panel panel">
@@ -261,34 +295,7 @@
       <div class="vehicle-preview">
         <img id="vehiclePreviewImg" src="assets/car-sedan.svg" alt="Vehicle">
       </div>
-      <div class="panel-title">DEMO SIMULATION</div>
-      <div class="demo-controls">
-        <button type="button" class="btn btn-primary" id="runDemoBtn">Run Demo</button>
-        <button type="button" class="btn btn-secondary" id="stopDemoBtn" style="display:none;">Stop Demo</button>
-        <div class="demo-field">
-          <label>Car speed (km/h)</label>
-          <input type="range" id="demoCarSpeed" min="20" max="160" value="20">
-          <span id="demoCarSpeedVal">20</span>
-        </div>
-        <div class="demo-field">
-          <label>Simulation speed</label>
-          <input type="range" id="demoSimSpeed" min="1" max="20" value="1">
-          <span id="demoSimSpeedVal">1×</span>
-        </div>
-        <div class="demo-move-buttons" id="demoMoveButtons" style="display:none;">
-          <label>Move car</label>
-          <div class="demo-move-row">
-            <button type="button" class="btn btn-icon demo-move-btn" id="demoMoveForward" title="Forward">▲</button>
-          </div>
-          <div class="demo-move-row">
-            <button type="button" class="btn btn-icon demo-move-btn" id="demoMoveLeft" title="Left">◀</button>
-            <button type="button" class="btn btn-icon demo-move-btn" id="demoMoveRight" title="Right">▶</button>
-          </div>
-          <div class="demo-move-row">
-            <button type="button" class="btn btn-icon demo-move-btn" id="demoMoveBackward" title="Backward">▼</button>
-          </div>
-        </div>
-      </div>
+      <!-- demo controls moved to floating drawer -->
         <div class="dev-tuning-panel" id="devTuningPanel">
           <button type="button" class="dev-tuning-toggle" id="devTuningToggle" aria-expanded="false">Developer: Energy tuning</button>
           <div class="dev-tuning-body" id="devTuningBody" style="display:none;">
@@ -408,18 +415,18 @@
     }
   </script>
   <script src="js/config.js"></script>
-  <script src="js/energy-model-config.js?v=5"></script>
+  <script src="js/energy-model-config.js?v=6"></script>
   <script src="data/embedded.js"></script>
   <script src="js/data-loader.js"></script>
   <script src="js/weather.js"></script>
   <script src="js/search.js"></script>
-  <script src="js/map.js?v=5"></script>
-  <script src="js/routing.js?v=5"></script>
-  <script src="js/trip.js?v=5"></script>
+  <script src="js/map.js?v=13"></script>
+  <script src="js/routing.js?v=6"></script>
+  <script src="js/trip.js?v=6"></script>
   <script src="js/energy-bar.js"></script>
   <script src="js/chargers.js"></script>
   <script src="js/ui.js"></script>
-  <script src="js/app.js?v=5"></script>
+  <script src="js/app.js?v=11"></script>
   <script>
     try {
       var carEl = document.getElementById('energyBarCar');

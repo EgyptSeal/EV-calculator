@@ -623,20 +623,11 @@ html.theme-light .nav-instruction-icon svg { fill: var(--accent-cyan); }
   position: relative; display: flex !important;
   align-items: center; justify-content: center;
   border: none !important; background: transparent !important; outline: none !important;
-  pointer-events: none; visibility: visible !important; opacity: 1 !important;
+  pointer-events: none; visibility: visible !important;
   overflow: visible;
-  transform: perspective(320px) rotateX(12deg);
-  transform-style: preserve-3d;
-}
-.nav-car-marker::before, .demo-car-marker::before {
-  content: ''; position: absolute; left: 50%; top: 58%;
-  width: 55%; height: 22%;
-  transform: translate(-50%, -50%) rotateX(90deg);
-  background: radial-gradient(ellipse 80% 50%, rgba(0,0,0,0.3) 0%, transparent 70%);
-  pointer-events: none; z-index: 0;
 }
 .nav-car-marker .car-marker-icon, .demo-car-marker .car-marker-icon {
-  filter: drop-shadow(0 3px 6px rgba(0,0,0,0.3)) drop-shadow(0 1px 3px rgba(0,0,0,0.15));
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.35));
 }
 .car-marker-ripples {
   position: absolute; left: -35%; top: -35%; width: 170%; height: 170%;
@@ -644,9 +635,9 @@ html.theme-light .nav-instruction-icon svg { fill: var(--accent-cyan); }
 }
 .car-marker-ripple {
   position: absolute; width: 100%; height: 100%;
-  border: 4px solid var(--car-ripple); border-radius: 50%;
-  animation: carMarkerRipple 2s ease-out infinite;
-  transform: scale(0.4); opacity: 1;
+  border: 3px solid rgba(56, 130, 246, 0.45); border-radius: 50%;
+  animation: carMarkerRipple 2.2s ease-out infinite;
+  transform: scale(0.5); opacity: 1;
 }
 .car-marker-dot {
   position: relative; z-index: 1; width: 58%; height: 58%;
@@ -659,6 +650,7 @@ html.theme-light .nav-instruction-icon svg { fill: var(--accent-cyan); }
   object-fit: contain; object-position: center;
   pointer-events: none; user-select: none; display: block;
   background: transparent !important;
+  border-radius: 50%;
 }
 
 /* ============================================================
@@ -960,9 +952,45 @@ html.theme-light .nav-instruction-icon svg { fill: var(--accent-cyan); }
 .edit-name-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 /* ============================================================
-   DEMO CONTROLS
+   DEMO CONTROLS – Floating drawer
    ============================================================ */
-.demo-controls { margin-top: 8px; }
+.demo-toggle-btn {
+  position: absolute; bottom: 16px; right: 16px; z-index: 100;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 9px 16px; font-size: 0.78rem; font-weight: 700;
+  color: #fff; background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.12); border-radius: var(--radius-md);
+  cursor: pointer; pointer-events: auto;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
+  font-family: 'Inter', sans-serif; letter-spacing: 0.03em;
+  transition: background 0.2s, border-color 0.2s, transform 0.15s;
+}
+.demo-toggle-btn:hover { background: rgba(15, 23, 42, 0.96); border-color: rgba(255,255,255,0.22); }
+.demo-toggle-btn:active { transform: scale(0.96); }
+.demo-toggle-btn svg { flex-shrink: 0; }
+
+.demo-drawer {
+  position: absolute; top: 0; left: 0; bottom: 0; z-index: 110;
+  width: 260px; max-width: 80vw;
+  background: rgba(15, 23, 42, 0.94);
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(12px);
+  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.4);
+  transform: translateX(-100%);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow-y: auto; overflow-x: hidden;
+  padding: 16px; pointer-events: auto;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.demo-drawer.open { transform: translateX(0); }
+.demo-drawer-header {
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em;
+  color: var(--text-secondary); margin-bottom: 8px;
+  padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+.demo-controls { margin-top: 4px; }
 .demo-controls .btn { margin-bottom: 8px; width: 100%; }
 .demo-field { margin-bottom: 10px; }
 .demo-field label { display: block; font-size: 0.7rem; color: var(--text-tertiary); margin-bottom: 3px; font-weight: 500; }
@@ -1531,13 +1559,13 @@ html.theme-light .vehicle-modal .vehicle-card.selected,
   transform: translateX(0);
   background: linear-gradient(135deg, #475569 0%, #334155 100%);
 }
-.ac-toggle-label { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.03em; transition: opacity 0.2s; }
+.ac-toggle-label { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.03em; transition: opacity 0.2s, color 0.2s; }
 .ac-toggle-pill .ac-label-off { color: var(--text-tertiary); }
-.ac-toggle-pill .ac-label-on { color: var(--accent-cyan); }
+.ac-toggle-pill .ac-label-on { color: var(--text-tertiary); }
 .ac-toggle-pill.ac-off .ac-label-off { color: var(--accent-cyan); opacity: 1; }
-.ac-toggle-pill.ac-off .ac-label-on { color: var(--text-tertiary); opacity: 0.5; }
+.ac-toggle-pill.ac-off .ac-label-on { color: var(--text-tertiary); opacity: 0.5; font-weight: 600; }
 .ac-toggle-pill:not(.ac-off) .ac-label-off { opacity: 0.5; }
-.ac-toggle-pill:not(.ac-off) .ac-label-on { opacity: 1; }
+.ac-toggle-pill:not(.ac-off) .ac-label-on { color: #22c55e; font-weight: 800; opacity: 1; }
 
 /* Modal preview */
 .modal-preview {

@@ -219,7 +219,7 @@
     const driverFact = driverBehaviorMultiplier(options.drivingStyleScore);
 
     var raw = base * speedMult * elevFactor * tempFactor * windFact * trafficFact * loadFact * hvacFact * modeFact * driverFact;
-    var cal = (getTuning().base_calibration_factor != null ? getTuning().base_calibration_factor : 0.97);
+    var cal = (getTuning().base_calibration_factor != null ? getTuning().base_calibration_factor : 0.94);
     var bias = (options.liveConsumptionBias != null && options.liveConsumptionBias > 0) ? options.liveConsumptionBias : 1.0;
     const adjusted = raw * cal * bias;
     return Math.max(0.05, adjusted);

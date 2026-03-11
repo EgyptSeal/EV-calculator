@@ -5,8 +5,8 @@
  */
 (function (global) {
   var TUNING = {
-    /** 1) Calibration: final_consumption = raw × base_calibration_factor. 0.97 ≈ 3% lower. */
-    base_calibration_factor: 0.97,
+    /** 1) Calibration: final_consumption = raw × base_calibration_factor. 0.94 ≈ 6% lower than original. */
+    base_calibration_factor: 0.94,
 
     /** 2) Aerodynamic / high-speed: multiplier applied above 90 km/h and more above 110. */
     aerodynamic_speed_multiplier_90: 1.08,

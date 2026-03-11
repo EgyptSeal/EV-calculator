@@ -1253,6 +1253,11 @@
     if (startNavBtn) startNavBtn.addEventListener('click', function () {
       if (!state.route || !state.endCoords) return;
       if (MapModule.removeDemoCar) MapModule.removeDemoCar();
+      if ('wakeLock' in navigator) {
+        navigator.wakeLock.request('screen').then(function (lock) {
+          state._wakeLock = lock;
+        }).catch(function () {});
+      }
       state.navigationActive = true;
       state.navPositionAlongRouteKm = 0;
       state.lastNavGpsPositionKm = null;
@@ -1263,6 +1268,8 @@
       state.smoothedNavBatteryPct = state.startBattery;
       state._lastNavDisplayKm = 0;
       state._lastNavDisplayKmTime = Date.now();
+      state._navLastGoodGpsKm = null;
+      state._navLastGoodGpsTime = null;
       state.driverBehavior = { recentSpeeds: [], timestamps: [] };
       state.driverBehaviorScore = 0.5;
       state.liveConsumptionBias = 1.0;
@@ -1283,11 +1290,15 @@
       setNavLayoutExpanded(true);
       var lastNavMapUpdateTime = 0;
       var lastNavInstructionBoxUpdateTime = 0;
-      var NAV_MAP_UPDATE_INTERVAL_MS = 180;
+      var lastRouteTrimTime = 0;
+      var NAV_MAP_UPDATE_INTERVAL_MS = 60;
       var NAV_INSTRUCTION_BOX_INTERVAL_MS = 200;
-      if (state.navSmoothIntervalId) clearInterval(state.navSmoothIntervalId);
-      state.navSmoothIntervalId = setInterval(function () {
-        if (!state.navigationActive || !state.route || !state.route.coordinates) return;
+      var NAV_ROUTE_TRIM_INTERVAL_MS = 500;
+      if (state.navSmoothIntervalId) { clearInterval(state.navSmoothIntervalId); state.navSmoothIntervalId = null; }
+      if (state._navRafId) { cancelAnimationFrame(state._navRafId); state._navRafId = null; }
+      var _navLastFrameTime = performance.now();
+      function navSmoothFrame(timestamp) {
+        if (!state.navigationActive || !state.route || !state.route.coordinates) { state._navRafId = requestAnimationFrame(navSmoothFrame); return; }
         var routeCoords = state.route.coordinates;
         var totalKm = state.route.distanceKm;
         if (totalKm == null || totalKm <= 0) {
@@ -1295,34 +1306,42 @@
           for (var i = 1; i < routeCoords.length; i++) totalKm += Chargers.haversineKm(routeCoords[i-1][1], routeCoords[i-1][0], routeCoords[i][1], routeCoords[i][0]);
         }
         var now = Date.now();
+        var dtMs = Math.min(timestamp - _navLastFrameTime, 2000);
+        _navLastFrameTime = timestamp;
+        var dtSec = dtMs / 1000;
+
         var displayKm = state.navPositionAlongRouteKm;
         if (state.lastNavGpsPositionKm != null && state.lastNavGpsTime != null) {
           var speedKmh = state.currentSpeedKmh || 0;
-          var targetKm = state.lastNavGpsPositionKm + (speedKmh / 3600) * ((now - state.lastNavGpsTime) / 1000);
+          var timeSinceGps = (now - state.lastNavGpsTime) / 1000;
+          var extrapolateKm = Math.min(timeSinceGps, 3) * (speedKmh / 3600);
+          var targetKm = state.lastNavGpsPositionKm + extrapolateKm;
           targetKm = Math.max(0, Math.min(totalKm, targetKm));
           if (state.navDisplayKm == null) state.navDisplayKm = targetKm;
-          var NAV_SMOOTH_LERP = 0.08;
-          state.navDisplayKm = state.navDisplayKm + (targetKm - state.navDisplayKm) * NAV_SMOOTH_LERP;
+          var lerpFactor = 1 - Math.pow(0.05, dtSec);
+          state.navDisplayKm = state.navDisplayKm + (targetKm - state.navDisplayKm) * lerpFactor;
           state.navDisplayKm = Math.max(0, Math.min(totalKm, state.navDisplayKm));
-          var maxIncreaseKm = ((now - (state._lastNavDisplayKmTime || now)) / 1000) * ((state.currentSpeedKmh || 30) / 3600) * 1.5;
-          state.navDisplayKm = Math.min(state.navDisplayKm, (state._lastNavDisplayKm != null ? state._lastNavDisplayKm : 0) + Math.max(0, maxIncreaseKm));
-          state._lastNavDisplayKm = state.navDisplayKm;
-          state._lastNavDisplayKmTime = now;
           displayKm = state.navDisplayKm;
         } else {
           displayKm = 0;
         }
         state.navPositionAlongRouteKm = displayKm;
         var pt = Chargers.getPointAlongRoute && Chargers.getPointAlongRoute(routeCoords, displayKm);
-        if (!pt || pt.length < 2 || typeof pt[0] !== 'number' || typeof pt[1] !== 'number' || !Number.isFinite(pt[0]) || !Number.isFinite(pt[1])) return;
+        if (!pt || pt.length < 2 || typeof pt[0] !== 'number' || typeof pt[1] !== 'number' || !Number.isFinite(pt[0]) || !Number.isFinite(pt[1])) { state._navRafId = requestAnimationFrame(navSmoothFrame); return; }
         var carLng = pt[0], carLat = pt[1];
         var seg = MapModule.getSegmentIndexFromRoute ? MapModule.getSegmentIndexFromRoute(routeCoords, carLng, carLat) : 0;
         var br = MapModule.getBearingFromRoute ? MapModule.getBearingFromRoute(routeCoords, carLng, carLat) : null;
         var turnOff = MapModule.getTurnOffsetFromRoute ? MapModule.getTurnOffsetFromRoute(routeCoords, seg) : 0;
-        if (state.lastNavGpsPositionKm != null && now - lastNavMapUpdateTime >= NAV_MAP_UPDATE_INTERVAL_MS && Number.isFinite(carLng) && Number.isFinite(carLat)) {
-          lastNavMapUpdateTime = now;
+        if (state.lastNavGpsPositionKm != null && Number.isFinite(carLng) && Number.isFinite(carLat)) {
           if (MapModule.setNavigationCarPosition) MapModule.setNavigationCarPosition(carLng, carLat, br, turnOff);
-          if (MapModule.followCar) MapModule.followCar(carLng, carLat, br, undefined, state.currentSpeedKmh || 0, {});
+          if (now - lastNavMapUpdateTime >= NAV_MAP_UPDATE_INTERVAL_MS) {
+            lastNavMapUpdateTime = now;
+            if (MapModule.followCar) MapModule.followCar(carLng, carLat, br, undefined, state.currentSpeedKmh || 0, {});
+          }
+        }
+        if (displayKm > 0.01 && MapModule.trimRouteToRemaining && now - lastRouteTrimTime >= NAV_ROUTE_TRIM_INTERVAL_MS) {
+          lastRouteTrimTime = now;
+          MapModule.trimRouteToRemaining(routeCoords, displayKm);
         }
         if (now - lastNavInstructionBoxUpdateTime >= NAV_INSTRUCTION_BOX_INTERVAL_MS) {
           lastNavInstructionBoxUpdateTime = now;
@@ -1423,7 +1442,9 @@
             });
           }
         }
-      }, 80);
+        state._navRafId = requestAnimationFrame(navSmoothFrame);
+      }
+      state._navRafId = requestAnimationFrame(navSmoothFrame);
       navigator.geolocation.getCurrentPosition(
         function (pos) {
           var lng = pos.coords.longitude, lat = pos.coords.latitude;
@@ -1448,8 +1469,10 @@
           var lng = pos.coords.longitude;
           var lat = pos.coords.latitude;
           if (typeof lng !== 'number' || typeof lat !== 'number' || isNaN(lng) || isNaN(lat) || (lng === 0 && lat === 0) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
-          var currentSpeedKmh = (pos.coords.speed != null && !isNaN(pos.coords.speed)) ? Math.round(pos.coords.speed * 3.6) : null;
-          state.currentSpeedKmh = currentSpeedKmh != null ? currentSpeedKmh : state.maxSpeedKmh;
+          var accuracy = pos.coords.accuracy;
+          if (accuracy != null && accuracy > 150) return;
+          var currentSpeedKmh = (pos.coords.speed != null && !isNaN(pos.coords.speed) && pos.coords.speed >= 0) ? Math.round(pos.coords.speed * 3.6) : null;
+          state.currentSpeedKmh = currentSpeedKmh != null ? currentSpeedKmh : (state.currentSpeedKmh || 0);
           updateDriverBehaviorFromSpeed(state.currentSpeedKmh);
           var routeCoords = (state.route && state.route.coordinates && state.route.coordinates.length >= 2)
             ? state.route.coordinates
@@ -1458,12 +1481,25 @@
               : null;
           if (!state.route || !routeCoords) return;
           var projected = Chargers.projectOntoRoute && Chargers.projectOntoRoute(routeCoords, lng, lat);
-          var ROUTE_SNAP_MARGIN_KM = 0.004;
-          if (projected && (projected.distanceFromRouteKm <= ROUTE_SNAP_MARGIN_KM || state.lastNavGpsPositionKm == null)) {
-            state.lastNavGpsPositionKm = projected.distanceAlongKm;
-            state.lastNavGpsTime = Date.now();
-            if (state.navDisplayKm == null) state.navDisplayKm = projected.distanceAlongKm;
+          var ROUTE_SNAP_MARGIN_KM = 0.05;
+          if (!projected || projected.distanceFromRouteKm > ROUTE_SNAP_MARGIN_KM) return;
+          var newKm = projected.distanceAlongKm;
+          var nowMs = Date.now();
+          if (state._navLastGoodGpsKm != null && state._navLastGoodGpsTime != null) {
+            var dtSec = (nowMs - state._navLastGoodGpsTime) / 1000;
+            if (dtSec < 0.3) return;
+            var jump = newKm - state._navLastGoodGpsKm;
+            var maxSpd = Math.max(state.currentSpeedKmh || 0, state.maxSpeedKmh || 120, 60);
+            var maxForwardKm = (maxSpd / 3600) * dtSec * 3;
+            var maxBackwardKm = 0.15;
+            if (jump > maxForwardKm) return;
+            if (jump < -maxBackwardKm) return;
           }
+          state._navLastGoodGpsKm = newKm;
+          state._navLastGoodGpsTime = nowMs;
+          state.lastNavGpsPositionKm = newKm;
+          state.lastNavGpsTime = nowMs;
+          if (state.navDisplayKm == null) state.navDisplayKm = newKm;
           updateSpeedSign(pos.coords.speed, state.maxSpeedKmh);
           var distTraveledM = (projected ? projected.distanceAlongKm : Chargers.distanceAlongRouteToPointKm(routeCoords, lng, lat)) * 1000;
           var carLng = projected ? projected.lng : lng, carLat = projected ? projected.lat : lat;
@@ -1556,6 +1592,14 @@
       );
     });
     if (stopRouteBtn) stopRouteBtn.addEventListener('click', doStopNavigation);
+
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible' && state.navigationActive) {
+        state._navLastGoodGpsTime = null;
+        state._navLastGoodGpsKm = null;
+      }
+    });
+
     var mapRecenterBtn = document.getElementById('mapRecenterBtn');
     if (mapRecenterBtn) mapRecenterBtn.addEventListener('click', function () {
       if (!state.navigationActive || !MapModule.recenterOnCar) return;
@@ -1599,8 +1643,12 @@
     state.smoothedNavBatteryPct = null;
     state._lastNavDisplayKm = null;
     state._lastNavDisplayKmTime = null;
+    state._navLastGoodGpsKm = null;
+    state._navLastGoodGpsTime = null;
+    if (state._navRafId) { cancelAnimationFrame(state._navRafId); state._navRafId = null; }
     if (state.navSmoothIntervalId) { clearInterval(state.navSmoothIntervalId); state.navSmoothIntervalId = null; }
     if (state.watchId != null) { navigator.geolocation.clearWatch(state.watchId); state.watchId = null; }
+    if (state._wakeLock) { try { state._wakeLock.release(); } catch (e) {} state._wakeLock = null; }
     if (MapModule.exitNavigationMode) MapModule.exitNavigationMode();
     if (MapModule.clearNavigationCar) MapModule.clearNavigationCar();
     updateNavInstructionBox({ hide: true });
@@ -1880,7 +1928,7 @@
   }
 
   var DEV_TUNING_DEFAULTS = {
-    base_calibration_factor: 0.97,
+    base_calibration_factor: 0.94,
     aerodynamic_speed_multiplier_90: 1.08,
     aerodynamic_speed_multiplier_110: 1.22,
     speed_curve_exponent: 1.65,
@@ -1982,6 +2030,10 @@
       updateNavInstructionBox({ hide: true });
       if (runBtn) { runBtn.textContent = 'Run Demo'; runBtn.style.display = ''; }
       if (stopBtn) stopBtn.style.display = 'none';
+      if (state.route && Routing && Routing.drawRoute) {
+        MapModule.removeRouteLayer('ev-trip-route');
+        Routing.drawRoute(MapModule, state.route);
+      }
       applyTripToUI();
     }
 
@@ -2033,6 +2085,7 @@
       var lastDemoGpsTime = Date.now();
       var demoGpsReportedKm = 0;
       var demoDistanceTraveledKm = 0;
+      var lastDemoRouteTrimTime = 0;
       var demoCurrentCarSpeedKmh = parseInt(carSpeed && carSpeed.value ? carSpeed.value : 20, 10) || 20;
       var demoCurrentSimMult = parseInt(simSpeed && simSpeed.value ? simSpeed.value : 1, 10) || 1;
       var DEMO_SPEED_SMOOTH = 0.03;
@@ -2154,6 +2207,10 @@
         }
         var turnOffset = MapModule.getTurnOffsetFromRoute ? MapModule.getTurnOffsetFromRoute(coords, seg) : 0;
         if (MapModule.setDemoCarPosition) MapModule.setDemoCarPosition(lng, lat, bearing, turnOffset);
+        if (positionKm > 0.01 && MapModule.trimRouteToRemaining && now - lastDemoRouteTrimTime >= 300) {
+          lastDemoRouteTrimTime = now;
+          MapModule.trimRouteToRemaining(coords, positionKm);
+        }
         var demoDistTraveledM = positionKm * 1000;
         var banner = (MapModule.getBannerInstruction && state.route && state.route.maneuvers) ? MapModule.getBannerInstruction(state.route, seg, demoDistTraveledM) : null;
         var t = banner && (banner.type || '').toLowerCase().replace(/_/g, ' ');

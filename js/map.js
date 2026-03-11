@@ -20,16 +20,16 @@
 
   var FALLBACK_STYLE_DAY = 'mapbox://styles/mapbox/light-v11';
   var FALLBACK_STYLE_NIGHT = 'mapbox://styles/mapbox/dark-v11';
-  var FOLLOW_ZOOM = 18.5;
-  var FOLLOW_ZOOM_APPROACH_TURN = 20;
+  var FOLLOW_ZOOM = 15.8;
+  var FOLLOW_ZOOM_APPROACH_TURN = 17;
   var FOLLOW_ZOOM_APPROACH_DISTANCE_M = 350;
-  var FOLLOW_PITCH = 62;
+  var FOLLOW_PITCH = 55;
   var FOLLOW_PITCH_MIN_KMH = 5;
   var FOLLOW_PITCH_MAX_KMH = 120;
-  var FOLLOW_PITCH_STOPPED = 58;
-  var FOLLOW_PITCH_MAX = 80;
-  var FOLLOW_DURATION_MS = 120;
-  var FOLLOW_CAR_BOTTOM_MARGIN_PX = 140;
+  var FOLLOW_PITCH_STOPPED = 50;
+  var FOLLOW_PITCH_MAX = 65;
+  var FOLLOW_DURATION_MS = 250;
+  var FOLLOW_CAR_BOTTOM_MARGIN_PX = 160;
   var FOLLOW_CENTER_AHEAD_KM = 0;
 
   function styleUrl(which) {
@@ -820,6 +820,39 @@
     }
   }
 
+  function trimRouteToRemaining(routeCoordinates, distanceAlongKm) {
+    if (!map || !routeCoordinates || routeCoordinates.length < 2 || distanceAlongKm <= 0) return;
+    var acc = 0;
+    var trimIdx = 0;
+    var trimFrac = 0;
+    for (var j = 0; j < routeCoordinates.length - 1; j++) {
+      var c1 = routeCoordinates[j], c2 = routeCoordinates[j + 1];
+      var segKm = global.Chargers && global.Chargers.haversineKm
+        ? global.Chargers.haversineKm(c1[1], c1[0], c2[1], c2[0])
+        : Math.sqrt(Math.pow(c2[0] - c1[0], 2) + Math.pow(c2[1] - c1[1], 2)) * 111;
+      if (acc + segKm >= distanceAlongKm) {
+        trimIdx = j;
+        trimFrac = segKm > 0 ? (distanceAlongKm - acc) / segKm : 0;
+        break;
+      }
+      acc += segKm;
+      if (j === routeCoordinates.length - 2) { trimIdx = j; trimFrac = 1; }
+    }
+    var startPt = routeCoordinates[trimIdx];
+    var endPt = routeCoordinates[trimIdx + 1] || startPt;
+    var interpLng = startPt[0] + (endPt[0] - startPt[0]) * trimFrac;
+    var interpLat = startPt[1] + (endPt[1] - startPt[1]) * trimFrac;
+    var remaining = [[interpLng, interpLat]];
+    for (var k = trimIdx + 1; k < routeCoordinates.length; k++) {
+      remaining.push(routeCoordinates[k]);
+    }
+    if (remaining.length < 2) return;
+    var src = map.getSource('ev-trip-route');
+    if (src) {
+      src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: remaining } });
+    }
+  }
+
   function getUserLocation() {
     return userLocation;
   }
@@ -861,6 +894,7 @@
     clearNavigationCar,
     resetUserPannedMap,
     recenterOnCar,
+    trimRouteToRemaining,
     setTempSavePin,
     removeTempSavePin,
   };
